@@ -1,5 +1,5 @@
 {
-  "name": "openclaw-plugin-weave",
+  "name": "weave-openclaw",
   "version": "0.0.1",
   "description": "OpenClaw third-party plugin: emit agent diagnostic events to W&B Weave's Agents OTel endpoint (weave.* attribute namespace).",
   "license": "MIT",
@@ -49,6 +49,8 @@
   "scripts": {
     "build": "tsc -p .",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "secrets:scan": "gitleaks dir . --no-banner --redact",
+    "check": "pnpm test && pnpm build && pnpm secrets:scan"
   }
 }

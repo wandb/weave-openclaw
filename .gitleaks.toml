@@ -1,0 +1,11 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Synthetic fixtures used by redaction/header tests"
+paths = ['''src/.*\.test\.ts''']
+regexes = [
+  '''sk-live-abcd-NEVER-IN-PLAIN''',
+  '''sensitive-secret-789''',
+  '''mykey-123-xyz''',
+]

@@ -114,7 +114,7 @@ export function createWeaveHookState(): WeaveHookState {
  * its own diagnostic-event bus and ensures every registration in the same
  * process shares the same state.
  */
-const HOOK_STATE_GLOBAL_KEY = Symbol.for("openclaw-plugin-weave.hookState.v1");
+const HOOK_STATE_GLOBAL_KEY = Symbol.for("weave-openclaw.hookState.v1");
 
 export function getSharedWeaveHookState(): WeaveHookState {
   const g = globalThis as Record<PropertyKey, unknown>;

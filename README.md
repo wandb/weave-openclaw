@@ -1,4 +1,4 @@
-# openclaw-plugin-weave
+# weave-openclaw
 
 Third-party OpenClaw plugin that emits agent diagnostic events as OpenTelemetry
 spans to **W&B Weave's Agents observability endpoint** (`/agents/otel/v1/traces`,
@@ -31,7 +31,7 @@ this plugin sends a Weave-flavored stream to W&B.
 ## Install
 
 ```bash
-pnpm add openclaw-plugin-weave
+pnpm add weave-openclaw
 ```
 
 Then enable in your gateway config:

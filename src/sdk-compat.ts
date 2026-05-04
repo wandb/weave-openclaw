@@ -21,20 +21,20 @@ export function checkSdkCompat(api: unknown): SdkCompatResult {
   if (!api || typeof api !== "object") {
     return {
       ok: false,
-      message: `openclaw-plugin-weave: incompatible plugin SDK (api is ${typeof api}). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}.`,
+      message: `weave-openclaw: incompatible plugin SDK (api is ${typeof api}). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}.`,
     };
   }
   const a = api as Record<string, unknown>;
   if (typeof a.on !== "function") {
     return {
       ok: false,
-      message: `openclaw-plugin-weave: incompatible plugin SDK (api.on is not a function). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}; please upgrade OpenClaw.`,
+      message: `weave-openclaw: incompatible plugin SDK (api.on is not a function). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}; please upgrade OpenClaw.`,
     };
   }
   if (typeof a.registerService !== "function") {
     return {
       ok: false,
-      message: `openclaw-plugin-weave: incompatible plugin SDK (api.registerService is not a function). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}; please upgrade OpenClaw.`,
+      message: `weave-openclaw: incompatible plugin SDK (api.registerService is not a function). This plugin requires pluginApi ${REQUIRED_PLUGIN_API}; please upgrade OpenClaw.`,
     };
   }
   return { ok: true };

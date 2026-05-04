@@ -13,7 +13,7 @@ const ROOT_SPAN_ID = "1111111111111111";
 function makeCtx(): OpenClawPluginServiceContext {
   return {
     config: {} as never,
-    stateDir: "/tmp/openclaw-plugin-weave-smoke",
+    stateDir: "/tmp/weave-openclaw-smoke",
     logger: {
       info: vi.fn(),
       warn: vi.fn(),

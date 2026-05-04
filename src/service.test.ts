@@ -16,7 +16,7 @@ const TOOL_SPAN_ID = "3333333333333333";
 function makeCtx(): OpenClawPluginServiceContext {
   return {
     config: {} as never,
-    stateDir: "/tmp/openclaw-plugin-weave-test",
+    stateDir: "/tmp/weave-openclaw-test",
     logger: {
       info: vi.fn(),
       warn: vi.fn(),

@@ -74,7 +74,7 @@ describe("sanitizeAttrJsonWithFlag — over-budget input is structurally truncat
   });
 
   it("the realistic plugin shape: array with one normal message + one huge tool-result", () => {
-    // Mirrors the openclaw-plugin-weave failure case: a few small history
+    // Mirrors the weave-openclaw failure case: a few small history
     // items followed by one toolResult message whose content is a 6000+
     // char skill description — the byte-truncate strategy used to clip
     // mid-string and break json.loads on the server.
