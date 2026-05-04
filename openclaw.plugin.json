@@ -1,0 +1,120 @@
+{
+  "id": "weave",
+  "name": "W&B Weave",
+  "version": "0.0.1",
+  "description": "Emit OpenClaw agent diagnostic events as OpenTelemetry spans to W&B Weave's Agents OTel endpoint (weave.* attributes, /agents/otel/v1/traces).",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "entity": {
+        "type": "string",
+        "description": "W&B team or username slug.",
+        "minLength": 1
+      },
+      "project": {
+        "type": "string",
+        "description": "W&B project name.",
+        "minLength": 1
+      },
+      "apiKey": {
+        "description": "W&B API key. String literal (discouraged), { secretRef: { source, provider, id } } shape, or omit to read WANDB_API_KEY from env.",
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "provider", "id"],
+            "properties": {
+              "source": { "type": "string", "enum": ["env", "file", "exec"] },
+              "provider": { "type": "string", "minLength": 1 },
+              "id": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      },
+      "tier": {
+        "type": "string",
+        "enum": ["cloud", "dedicated"],
+        "default": "cloud",
+        "description": "cloud = trace.wandb.ai (multi-tenant). dedicated = your subdomain on wandb.io."
+      },
+      "subdomain": {
+        "type": "string",
+        "description": "Required when tier=dedicated. Your W&B subdomain (e.g. 'acme' for acme.wandb.io)."
+      },
+      "endpoint": {
+        "type": "string",
+        "description": "Override full traces URL. Skips tier/subdomain composition. Must end with /agents/otel/v1/traces."
+      },
+      "serviceName": {
+        "type": "string",
+        "default": "openclaw-agent",
+        "description": "OTel Resource service.name attribute."
+      },
+      "agentName": {
+        "type": "string",
+        "description": "Override for weave.agent.name. Falls back to harnessId/pluginId from events."
+      },
+      "agentVersion": {
+        "type": "string",
+        "description": "weave.agent.version attribute. Set 'auto' to generate <pkgVersion>+<startupTimestamp> on every gateway restart so each plugin build/restart is a distinct version row in the Agents tab. Leave unset to use the plugin package version. Set an explicit string (e.g. 'v0.1') to pin."
+      },
+      "agentDescription": {
+        "type": "string",
+        "description": "weave.agent.description attribute."
+      },
+      "captureContent": {
+        "type": "object",
+        "additionalProperties": false,
+        "default": { "enabled": false },
+        "properties": {
+          "enabled": { "type": "boolean", "default": false },
+          "inputMessages": { "type": "boolean", "default": false },
+          "outputMessages": { "type": "boolean", "default": false },
+          "toolArguments": { "type": "boolean", "default": false },
+          "toolResults": { "type": "boolean", "default": false },
+          "systemInstructions": { "type": "boolean", "default": false }
+        },
+        "description": "Best-effort content capture. Reads inputMessages/outputMessages/toolInput/toolOutput/systemPrompt fields from internal diagnostic events when present. Always passes through OpenClaw's redactSensitiveText."
+      },
+      "flushIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "default": 5000
+      },
+      "stripSenderWrapper": {
+        "type": "boolean",
+        "default": false,
+        "description": "When true, strip OpenClaw's metadata-wrapper prefix (`Conversation info` / `Sender (untrusted metadata)` / `[timestamp]`) from user-message content before emitting weave.input.messages — applies symmetrically to historyMessages and the in-flight prompt. Default false (raw): the OTel-conforming choice. `gen_ai.input.messages` is by spec the messages used in the operation, so wrappers belong in it; Phoenix, Helicone, Langfuse, and LangSmith all do the same. Set true to opt into a cleaner Weave Agents-tab chat view (the wrapper is ~500 chars and dwarfs the user's actual question), at the cost of losing visibility into prompt-injection or wrapper-format-drift bugs."
+      },
+      "emitGenAiAliases": {
+        "type": "boolean",
+        "default": true,
+        "description": "Dual-emit OTel-canonical gen_ai.* aliases alongside every weave.* attribute that has one. Default true — improves portability to non-Weave OTel backends (Datadog, Honeycomb, LangSmith, Langfuse) that only recognize gen_ai.*. The Weave server treats both forms identically via alias resolution, so toggling does not change Weave Agents-tab data quality. Set false to halve attribute-storage cost on Weave-only deployments."
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": { "label": "Enable Weave export" },
+    "entity": { "label": "W&B Entity (team/user)" },
+    "project": { "label": "W&B Project" },
+    "tier": { "label": "Deployment Tier" },
+    "subdomain": { "label": "Dedicated Subdomain" },
+    "stripSenderWrapper": {
+      "label": "Strip Sender wrapper",
+      "help": "Cleaner chat view at the cost of fidelity to what the LLM actually saw."
+    },
+    "captureContent.enabled": {
+      "label": "Capture conversation content",
+      "help": "Off by default. Enable only when your W&B project's retention policy is approved for prompt/response/tool text."
+    }
+  }
+}
