@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import type { RawWeavePluginConfig } from "./types.js";
 
 const AGENTS_TRACES_PATH = "/agents/otel/v1/traces";

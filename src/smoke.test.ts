@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import { type AddressInfo, createServer, type IncomingMessage, type Server } from "node:http";
 import {
   emitTrustedDiagnosticEvent,

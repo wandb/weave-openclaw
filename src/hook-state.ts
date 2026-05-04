@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event
  * service. Hooks fire from the OpenClaw runtime (registered in `register(api)`)

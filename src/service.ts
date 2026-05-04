@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import {
   context as otelContext,
   SpanKind,

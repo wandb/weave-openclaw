@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base";
 
 // ExportResultCode lives in @opentelemetry/core, which we don't direct-import

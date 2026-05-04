@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import { describe, expect, test, vi } from "vitest";
 import { checkSdkCompat, REQUIRED_PLUGIN_API } from "./sdk-compat.js";
 

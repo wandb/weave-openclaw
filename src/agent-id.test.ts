@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import { describe, expect, test } from "vitest";
 import { stableAgentId } from "./agent-id.js";
 

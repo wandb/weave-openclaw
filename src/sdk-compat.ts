@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 /**
  * Preflight check that the host OpenClaw plugin SDK exposes the surface this
  * plugin requires. Today: `api.on` and `api.registerService` must be functions.

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 import { readFile } from "node:fs/promises";
 import { coerceSecretRef, type SecretRef } from "openclaw/plugin-sdk/secret-ref-runtime";
 

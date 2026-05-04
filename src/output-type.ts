@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 /**
  * Detect the modality of a chat completion's `lastAssistant` payload for
  * `weave.output.type` / `gen_ai.output.type`. Maps to OTel's enum

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
 /**
  * Build the headers attached to every outbound OTLP request to W&B Weave's
  * `/agents/otel/v1/traces` endpoint.
