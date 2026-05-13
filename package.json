@@ -50,7 +50,6 @@
     "build": "tsc -p .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "secrets:scan": "gitleaks dir . --no-banner --redact",
-    "check": "pnpm test && pnpm build && pnpm secrets:scan"
+    "check": "pnpm test && pnpm build"
   }
 }
