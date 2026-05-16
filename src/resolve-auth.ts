@@ -7,6 +7,15 @@ import { coerceSecretRef, type SecretRef } from "openclaw/plugin-sdk/secret-ref-
 
 const ENV_FALLBACK_KEY = "WANDB_API_KEY";
 
+export type ResolvedWandbAuth = {
+  key: string;
+  /**
+   * Human-readable source identifier for logging. Never contains the key.
+   * Shape: "env:<VAR>" | "file:<PATH>" | "literal".
+   */
+  source: string;
+};
+
 /**
  * Resolve the W&B API key from one of these sources:
  *
@@ -17,11 +26,13 @@ const ENV_FALLBACK_KEY = "WANDB_API_KEY";
  * 2. Plain string in config (discouraged for production).
  * 3. `process.env.WANDB_API_KEY` if `apiKey` is undefined.
  *
+ * Returns `{ key, source }` where `source` is safe to log.
+ *
  * Throws when no key is found. The error never includes the key value.
  */
 export async function resolveWandbApiKey(
   apiKey: string | SecretRef | undefined,
-): Promise<string> {
+): Promise<ResolvedWandbAuth> {
   const ref = coerceSecretRef(apiKey);
   if (ref) {
     return await resolveSecretRef(ref);
@@ -31,24 +42,24 @@ export async function resolveWandbApiKey(
     if (trimmed.length === 0) {
       throw new Error("weave.apiKey is empty");
     }
-    return trimmed;
+    return { key: trimmed, source: "literal" };
   }
   const fromEnv = process.env[ENV_FALLBACK_KEY]?.trim();
   if (fromEnv && fromEnv.length > 0) {
-    return fromEnv;
+    return { key: fromEnv, source: `env:${ENV_FALLBACK_KEY}` };
   }
   throw new Error(
     `weave: no API key configured. Set weave.apiKey in plugin config or export ${ENV_FALLBACK_KEY}.`,
   );
 }
 
-async function resolveSecretRef(ref: SecretRef): Promise<string> {
+async function resolveSecretRef(ref: SecretRef): Promise<ResolvedWandbAuth> {
   if (ref.source === "env") {
     const value = process.env[ref.id]?.trim();
     if (!value || value.length === 0) {
       throw new Error(`weave: SecretRef env var "${ref.id}" is unset or empty.`);
     }
-    return value;
+    return { key: value, source: `env:${ref.id}` };
   }
   if (ref.source === "file") {
     let raw: string;
@@ -64,7 +75,7 @@ async function resolveSecretRef(ref: SecretRef): Promise<string> {
     if (value.length === 0) {
       throw new Error(`weave: SecretRef file "${ref.id}" is empty.`);
     }
-    return value;
+    return { key: value, source: `file:${ref.id}` };
   }
   throw new Error(
     `weave: SecretRef source "${ref.source}" is not supported by this plugin yet. Use "env" or "file".`,

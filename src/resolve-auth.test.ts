@@ -27,17 +27,21 @@ describe("resolveWandbApiKey", () => {
     }
   });
 
-  test("plain string is returned trimmed", async () => {
-    expect(await resolveWandbApiKey("  abc  ")).toBe("abc");
+  test("plain string is returned trimmed; source=literal", async () => {
+    const { key, source } = await resolveWandbApiKey("  abc  ");
+    expect(key).toBe("abc");
+    expect(source).toBe("literal");
   });
 
   test("empty plain string throws", async () => {
     await expect(resolveWandbApiKey("   ")).rejects.toThrowError(/empty/);
   });
 
-  test("undefined falls back to WANDB_API_KEY env", async () => {
+  test("undefined falls back to WANDB_API_KEY env; source=env:WANDB_API_KEY", async () => {
     process.env.WANDB_API_KEY = "from-env";
-    expect(await resolveWandbApiKey(undefined)).toBe("from-env");
+    const { key, source } = await resolveWandbApiKey(undefined);
+    expect(key).toBe("from-env");
+    expect(source).toBe("env:WANDB_API_KEY");
   });
 
   test("undefined with no env throws a non-leaking error", async () => {
@@ -46,14 +50,15 @@ describe("resolveWandbApiKey", () => {
     );
   });
 
-  test("SecretRef env source reads process.env", async () => {
+  test("SecretRef env source reads process.env; source=env:<id>", async () => {
     process.env.TEST_WANDB_KEY = "from-secret-ref";
-    const value = await resolveWandbApiKey({
+    const { key, source } = await resolveWandbApiKey({
       source: "env",
       provider: "default",
       id: "TEST_WANDB_KEY",
     });
-    expect(value).toBe("from-secret-ref");
+    expect(key).toBe("from-secret-ref");
+    expect(source).toBe("env:TEST_WANDB_KEY");
   });
 
   test("SecretRef env source throws when env var unset", async () => {
@@ -66,17 +71,18 @@ describe("resolveWandbApiKey", () => {
     ).rejects.toThrowError(/unset or empty/);
   });
 
-  test("SecretRef file source reads and trims", async () => {
+  test("SecretRef file source reads and trims; source=file:<path>", async () => {
     const dir = await mkdtemp(join(tmpdir(), "weave-auth-test-"));
     try {
       const filePath = join(dir, "key");
       await writeFile(filePath, "  file-key  \n", "utf8");
-      const value = await resolveWandbApiKey({
+      const { key, source } = await resolveWandbApiKey({
         source: "file",
         provider: "default",
         id: filePath,
       });
-      expect(value).toBe("file-key");
+      expect(key).toBe("file-key");
+      expect(source).toBe(`file:${filePath}`);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

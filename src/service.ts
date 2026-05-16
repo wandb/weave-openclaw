@@ -353,6 +353,7 @@ export function createWeaveService(
 
       let endpoint: string;
       let exporter: SpanExporter;
+      let authSource = "injected-exporter";
       try {
         endpoint = resolveWeaveEndpoint(raw);
         if (params.spanExporter) {
@@ -361,10 +362,11 @@ export function createWeaveService(
           // owner should manage that lifecycle.
           exporter = nonOwningExporter(params.spanExporter);
         } else {
-          const apiKey = await resolveWandbApiKey(raw.apiKey);
+          const auth = await resolveWandbApiKey(raw.apiKey);
+          authSource = auth.source;
           const realExporter = new OTLPTraceExporter({
             url: endpoint,
-            headers: buildExporterHeaders(apiKey, `${raw.entity}/${raw.project}`),
+            headers: buildExporterHeaders(auth.key, `${raw.entity}/${raw.project}`),
           });
           exporter = createExporterObserver(realExporter, {
             onWarn: (msg) => ctx.logger.warn(msg),
