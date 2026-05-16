@@ -322,6 +322,53 @@ arrive through `run.completed` with `outcome: "error"`.
 Logs go through `ctx.logger.debug` (falls back to `.info` if the host
 logger doesn't have `.debug`). The API key is never logged.
 
+## Troubleshooting
+
+### Plugin loaded but no spans show up in Weave
+
+Walk this checklist top-to-bottom:
+
+1. **Confirm the plugin is enabled.** Search the gateway log for the
+   line `weave: exporting to https://...`. If absent, the plugin
+   didn't activate — check the entries below it for
+   `weave: config.entity is required`, `weave: configuration error`,
+   or `[weave] incompatible plugin SDK`.
+2. **Confirm `diagnostics.enabled: true`** is set in the gateway
+   config. Without it, OpenClaw doesn't emit the diagnostic events
+   this plugin consumes, so there is nothing to translate to spans.
+3. **Confirm entity/project match the W&B project in your browser.**
+   The startup line prints `project=<entity>/<project>`; that string
+   must match the URL slug of the Weave project you're inspecting.
+4. **Confirm the auth source.** The same startup line prints
+   `auth=env:WANDB_API_KEY` (or `file:...` / `env:<custom>` /
+   `literal`). If this is `env:WANDB_API_KEY` and you set the key in
+   a different env var, the plugin is reading the wrong key.
+
+### Export-failure warnings in the gateway log
+
+The plugin emits at most one `weave: export failure: <msg>` warning
+per 60-second window, with a one-line `weave: hint: <action>`
+appended when the error shape is recognised:
+
+| Hint phrase | Most likely cause | Fix |
+|---|---|---|
+| `check WANDB_API_KEY is valid and has access to the configured entity/project` | 401/403 — auth or authorization failure | Verify the key is current; confirm the team owns the entity/project. |
+| `endpoint URL not found; verify tier/subdomain or endpoint override resolves to a real traces URL` | 404 — wrong tier/subdomain | For dedicated, double-check `subdomain`. For self-managed, use the `endpoint` override and confirm it ends in `/agents/otel/v1/traces`. |
+| `Weave backend returned 5xx; retries continue` | Transient backend issue | Wait — the OTel BatchSpanProcessor retries automatically. Spans buffered while the link is down may be dropped if the gateway restarts. |
+| `network error reaching Weave; check DNS/proxy/egress` | DNS/proxy/firewall | Confirm the gateway host can reach `trace.wandb.ai` (or your dedicated subdomain) on 443. |
+
+When no hint is appended, the heuristic didn't recognise the error
+shape; the raw message is the only signal. File a bug if you see this
+class of failure regularly.
+
+### Need more detail
+
+Set `OPENCLAW_WEAVE_DEBUG=spans,trace-tree` in the gateway environment
+to get per-span creation logs and a tree dump of currently-active
+spans on every start/finalize. See the
+[Debug logging](#debug-logging) section above for the full flag list.
+The API key is never written to debug logs.
+
 ## License
 
 MIT
