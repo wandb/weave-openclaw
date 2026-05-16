@@ -4,7 +4,7 @@
 
 import type { ReadableSpan, SpanExporter } from "@opentelemetry/sdk-trace-base";
 import { describe, expect, test, vi } from "vitest";
-import { createExporterObserver } from "./exporter-observer.js";
+import { createExporterObserver, describeExportError } from "./exporter-observer.js";
 
 // Inline the OTel ExportResultCode enum values so we don't have to direct-dep
 // @opentelemetry/core. Stable: 0=SUCCESS, 1=FAILED.
@@ -125,5 +125,88 @@ describe("createExporterObserver", () => {
     expect(observed.forceFlush).toBeDefined();
     await observed.forceFlush!();
     expect(innerFlush).toHaveBeenCalled();
+  });
+});
+
+describe("describeExportError", () => {
+  test("OTLPExporterError shape 401 → auth hint", () => {
+    const err = Object.assign(new Error("Unauthorized"), { code: 401 });
+    const { message, hint } = describeExportError(err);
+    expect(message).toBe("Unauthorized");
+    expect(hint).toMatch(/WANDB_API_KEY/);
+  });
+
+  test("OTLPExporterError shape 403 → auth hint", () => {
+    const err = Object.assign(new Error("Forbidden"), { code: 403 });
+    expect(describeExportError(err).hint).toMatch(/WANDB_API_KEY/);
+  });
+
+  test("OTLPExporterError shape 404 → endpoint hint", () => {
+    const err = Object.assign(new Error("Not Found"), { code: 404 });
+    expect(describeExportError(err).hint).toMatch(/endpoint/i);
+  });
+
+  test("OTLPExporterError shape 503 → backend hint", () => {
+    const err = Object.assign(new Error("Service Unavailable"), { code: 503 });
+    expect(describeExportError(err).hint).toMatch(/5xx/);
+  });
+
+  test("fetch-transport non-retryable status 401 → auth hint", () => {
+    const err = new Error("Fetch request failed with non-retryable status 401");
+    expect(describeExportError(err).hint).toMatch(/WANDB_API_KEY/);
+  });
+
+  test("fetch-transport non-retryable status 404 → endpoint hint", () => {
+    const err = new Error("Fetch request failed with non-retryable status 404");
+    expect(describeExportError(err).hint).toMatch(/endpoint/i);
+  });
+
+  test("network error ENOTFOUND → network hint", () => {
+    const err = new Error("getaddrinfo ENOTFOUND trace.wandb.ai");
+    expect(describeExportError(err).hint).toMatch(/network/i);
+  });
+
+  test("network error ECONNREFUSED → network hint", () => {
+    const err = new Error("connect ECONNREFUSED 127.0.0.1:443");
+    expect(describeExportError(err).hint).toMatch(/network/i);
+  });
+
+  test("unrecognised error → no hint", () => {
+    const err = new Error("something weird happened");
+    const { message, hint } = describeExportError(err);
+    expect(message).toBe("something weird happened");
+    expect(hint).toBeUndefined();
+  });
+
+  test("non-Error value → string coerced, no hint", () => {
+    const { message, hint } = describeExportError("plain string err");
+    expect(message).toBe("plain string err");
+    expect(hint).toBeUndefined();
+  });
+});
+
+describe("createExporterObserver hint integration", () => {
+  test("warning includes hint when error matches a heuristic", async () => {
+    const inner = makeFakeExporter([
+      Object.assign(new Error("Unauthorized"), { code: 401 }),
+    ]);
+    const warn = vi.fn();
+    const observed = createExporterObserver(inner, { onWarn: warn });
+    await exportOnce(observed);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain("export failure: Unauthorized");
+    expect(line).toContain("weave: hint: ");
+    expect(line).toMatch(/WANDB_API_KEY/);
+  });
+
+  test("warning has no hint line for unrecognised errors", async () => {
+    const inner = makeFakeExporter([new Error("opaque mystery")]);
+    const warn = vi.fn();
+    const observed = createExporterObserver(inner, { onWarn: warn });
+    await exportOnce(observed);
+    const line = String(warn.mock.calls[0][0]);
+    expect(line).toContain("opaque mystery");
+    expect(line).not.toContain("weave: hint:");
   });
 });
