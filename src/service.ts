@@ -465,8 +465,21 @@ export function createWeaveService(
         }
       });
 
+      const tier = raw.tier ?? "cloud";
+      const captureFields: string[] = [];
+      if (resolvedCfg.captureContent.inputMessages) captureFields.push("inputMessages");
+      if (resolvedCfg.captureContent.outputMessages) captureFields.push("outputMessages");
+      if (resolvedCfg.captureContent.toolArguments) captureFields.push("toolArguments");
+      if (resolvedCfg.captureContent.toolResults) captureFields.push("toolResults");
+      if (resolvedCfg.captureContent.systemInstructions) captureFields.push("systemInstructions");
+      const captureSummary = captureFields.length === 0 ? "off" : captureFields.join(",");
+      ctx.logger.info(`weave: exporting to ${endpoint}`);
       ctx.logger.info(
-        `weave: exporting to ${endpoint} (project=${projectId}, service=${serviceName}, agentVersion=${resolvedAgentVersion})`,
+        `weave: project=${projectId} service=${serviceName} agentVersion=${resolvedAgentVersion} ` +
+          `tier=${tier} auth=${authSource} flushIntervalMs=${flushInterval} ` +
+          `emitGenAiAliases=${resolvedCfg.emitGenAiAliases} ` +
+          `stripSenderWrapper=${resolvedCfg.stripSenderWrapper} ` +
+          `captureContent=${captureSummary}`,
       );
     },
 

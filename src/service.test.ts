@@ -1180,4 +1180,22 @@ describe("createWeaveService (integration)", () => {
 
     expect(exporter.getFinishedSpans()).toHaveLength(1);
   });
+
+  test("startup info log reports resolved config summary", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "e", project: "p" },
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+    const info = ctx.logger.info as ReturnType<typeof vi.fn>;
+    const joined = info.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(joined).toContain("auth=");
+    expect(joined).toContain("tier=cloud");
+    expect(joined).toContain("flushIntervalMs=5000");
+    expect(joined).toContain("captureContent=off");
+    expect(joined).toContain("emitGenAiAliases=true");
+    expect(joined).toContain("stripSenderWrapper=false");
+    await service.stop?.(ctx);
+  });
 });
