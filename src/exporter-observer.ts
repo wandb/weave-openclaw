@@ -69,7 +69,8 @@ function extractHttpStatus(err: unknown, message: string): number | undefined {
     return (err as { code: number }).code;
   }
   const m = /non-retryable status (\d{3})/.exec(message);
-  if (m) return Number.parseInt(m[1], 10);
+  const captured = m?.[1];
+  if (captured !== undefined) return Number.parseInt(captured, 10);
   return undefined;
 }
 
