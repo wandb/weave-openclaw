@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
+import { setBoundedMap } from "./bounded-map.js";
+
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event
  * service. Hooks fire from the OpenClaw runtime (registered in `register(api)`)
@@ -158,10 +160,10 @@ export function beginModelCall(
   callId: string,
 ): void {
   if (!runId || !callId) return;
-  setBounded(state.currentCallByRun, runId, callId, MAX_RUNS_TO_TRACK);
+  setBoundedMap(state.currentCallByRun, runId, callId, MAX_RUNS_TO_TRACK);
   const pending = state.pendingLlmInputByRun.get(runId);
   if (pending) {
-    setBounded(state.llmInputs, callId, pending, MAX_CALLS);
+    setBoundedMap(state.llmInputs, callId, pending, MAX_CALLS);
     state.pendingLlmInputByRun.delete(runId);
   }
 }
@@ -183,7 +185,7 @@ export function bufferPendingLlmInputForRun(
   capture: LlmInputCapture,
 ): void {
   if (!runId) return;
-  setBounded(state.pendingLlmInputByRun, runId, capture, MAX_RUNS_TO_TRACK);
+  setBoundedMap(state.pendingLlmInputByRun, runId, capture, MAX_RUNS_TO_TRACK);
 }
 
 /**
@@ -207,7 +209,7 @@ export function captureLlmInput(
   capture: LlmInputCapture,
 ): void {
   if (!callId) return;
-  setBounded(state.llmInputs, callId, capture, MAX_CALLS);
+  setBoundedMap(state.llmInputs, callId, capture, MAX_CALLS);
 }
 
 export function captureLlmOutput(
@@ -216,7 +218,7 @@ export function captureLlmOutput(
   capture: LlmOutputCapture,
 ): void {
   if (!callId) return;
-  setBounded(state.llmOutputs, callId, capture, MAX_CALLS);
+  setBoundedMap(state.llmOutputs, callId, capture, MAX_CALLS);
 }
 
 export function captureToolStart(
@@ -225,7 +227,7 @@ export function captureToolStart(
   capture: ToolCallArgsCapture,
 ): void {
   if (!toolCallId) return;
-  setBounded(state.toolCallArgs, toolCallId, capture, MAX_TOOL_CALLS);
+  setBoundedMap(state.toolCallArgs, toolCallId, capture, MAX_TOOL_CALLS);
 }
 
 export function captureToolEnd(
@@ -234,7 +236,7 @@ export function captureToolEnd(
   capture: ToolCallResultCapture,
 ): void {
   if (!toolCallId) return;
-  setBounded(state.toolCallResults, toolCallId, capture, MAX_TOOL_CALLS);
+  setBoundedMap(state.toolCallResults, toolCallId, capture, MAX_TOOL_CALLS);
 }
 
 export function captureCompactionStart(
@@ -243,7 +245,7 @@ export function captureCompactionStart(
   capture: CompactionCapture,
 ): void {
   if (!runId) return;
-  setBounded(state.pendingCompactions, runId, capture, MAX_COMPACTIONS);
+  setBoundedMap(state.pendingCompactions, runId, capture, MAX_COMPACTIONS);
 }
 
 export function consumeCompaction(
@@ -288,12 +290,3 @@ export function lookupToolCall(
   };
 }
 
-function setBounded<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
-  if (map.size >= cap && !map.has(key)) {
-    const oldest = map.keys().next().value;
-    if (oldest !== undefined) {
-      map.delete(oldest);
-    }
-  }
-  map.set(key, value);
-}
