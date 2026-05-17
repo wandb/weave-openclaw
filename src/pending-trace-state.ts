@@ -18,15 +18,21 @@ export type PendingToolLoop = {
  * `context.assembled`, and `session_start` independently of the main span
  * lifecycle, so a usage event for a run can fire before downstream listeners
  * observe `run.started`. We buffer until the invoke_agent appears, then
- * stamp/drain.
+ * stamp/replay.
  *
- * Two drain hooks:
- *   - `drainOnInvokeAgentStart` — apply every buffered datum keyed by this
- *     trace (cost / aggregate usage / tool.loop events / context snapshot)
- *     and consume the per-sessionKey pending session_start.
- *   - `drainOnInvokeAgentEnd` — stamp the final cumulative cost and clear
- *     every per-trace bucket. Caller is responsible for the matching
- *     `invokeAgents.unregister(span)` and `invokeAgents.forgetSessionKey(traceId)`.
+ * Buffered data splits into two categories:
+ *
+ *   - **Running state** (`cost`, `usage`, `context`) — continuously updated
+ *     by subsequent `model.usage` / `context.assembled` events. Stamped on
+ *     the live span mid-flight by the service's handlers; `hydrate*` brings
+ *     a freshly-opened span up to current values without clearing them; cost
+ *     and usage get a final defensive stamp on `finalize*` (in case the last
+ *     update arrived between the last mid-flight stamp and run.completed),
+ *     then everything is cleared.
+ *
+ *   - **One-shot buffers** (`tool.loop` events, pending `session_start`) —
+ *     replayed exactly once on `hydrate*` and cleared from the buffer so the
+ *     next invoke_agent for the same trace/session doesn't see them again.
  *
  * FIFO-bounded per Map to defend against unbounded growth.
  */
@@ -112,16 +118,23 @@ export class PendingTraceState {
   }
 
   /**
-   * Apply every buffered datum keyed by `traceId` to the freshly-opened
-   * invoke_agent `span`, and consume the per-sessionKey pending session_start
-   * (if any). The cost is stamped if known, but NOT cleared — it continues
-   * to accumulate from later `model.usage` events until the span finalizes.
+   * Initialise a freshly-opened invoke_agent span with current per-trace
+   * state. Two categories of work:
+   *
+   *   - **Running state** (cost, usage, context): stamp current values on
+   *     the span. NOT cleared — they keep being updated by subsequent
+   *     `model.usage` / `context.assembled` events. The handlers will
+   *     re-stamp the live span mid-flight as updates arrive.
+   *   - **One-shot buffers** (tool.loop events, pending session_start):
+   *     replay each exactly once and clear from the buffer. A future
+   *     invoke_agent for the same trace/session must not see them again.
    */
-  drainOnInvokeAgentStart(p: {
+  hydrateInvokeAgentSpan(p: {
     span: Span;
     traceId: string;
     sessionKey?: string;
   }): void {
+    // Running state: stamp without clearing.
     const cost = this.costByTrace.get(p.traceId);
     if (typeof cost === "number" && Number.isFinite(cost)) {
       p.span.setAttribute("weave.cost.usd", cost);
@@ -130,14 +143,15 @@ export class PendingTraceState {
     if (usage) {
       for (const [k, v] of Object.entries(usage)) p.span.setAttribute(k, v);
     }
+    const context = this.contextByTrace.get(p.traceId);
+    if (context) {
+      for (const [k, v] of Object.entries(context)) p.span.setAttribute(k, v);
+    }
+    // One-shots: replay exactly once, then clear.
     const loops = this.toolLoopsByTrace.get(p.traceId);
     if (loops) {
       for (const ev of loops) p.span.addEvent(ev.name, ev.attrs);
       this.toolLoopsByTrace.delete(p.traceId);
-    }
-    const context = this.contextByTrace.get(p.traceId);
-    if (context) {
-      for (const [k, v] of Object.entries(context)) p.span.setAttribute(k, v);
     }
     if (p.sessionKey) {
       const pendingSession = this.sessionStartByKey.get(p.sessionKey);
@@ -153,20 +167,33 @@ export class PendingTraceState {
   }
 
   /**
-   * Stamp the final cumulative cost on `span` (the authoritative final value)
-   * and clear every per-trace bucket for this `traceId`. The sessionStart
-   * map is intentionally not cleared here — it's keyed by sessionKey, not
-   * traceId, and may be needed by a future invoke_agent in the same session.
+   * Stamp final running totals (cost, usage) on the invoke_agent span and
+   * clear all per-trace buckets. Mid-flight stamping has already written
+   * current values to the span; the re-stamp here is defensive against the
+   * case where a `model.usage` event arrived between the last mid-flight
+   * stamp and run.completed.
+   *
+   * Context is intentionally NOT re-stamped: it's a snapshot (each
+   * `context.assembled` replaces the prior value rather than accumulating),
+   * so whatever's on the span is already the latest authoritative value.
+   *
+   * `sessionStartByKey` is intentionally NOT touched: it's keyed by
+   * sessionKey, not traceId, and may legitimately be consumed by the next
+   * invoke_agent in the same session.
    */
-  drainOnInvokeAgentEnd(p: { span: Span; traceId: string }): void {
+  finalizeInvokeAgentSpan(p: { span: Span; traceId: string }): void {
     const cost = this.costByTrace.get(p.traceId);
     if (typeof cost === "number" && Number.isFinite(cost)) {
       p.span.setAttribute("weave.cost.usd", cost);
     }
+    const usage = this.usageByTrace.get(p.traceId);
+    if (usage) {
+      for (const [k, v] of Object.entries(usage)) p.span.setAttribute(k, v);
+    }
     this.costByTrace.delete(p.traceId);
     this.usageByTrace.delete(p.traceId);
-    this.toolLoopsByTrace.delete(p.traceId);
     this.contextByTrace.delete(p.traceId);
+    this.toolLoopsByTrace.delete(p.traceId);
   }
 
   clear(): void {

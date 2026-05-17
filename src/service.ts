@@ -720,7 +720,7 @@ export function createWeaveService(
           runId: eventRunId,
           sessionKey: eventSessionKey,
         });
-        pending.drainOnInvokeAgentStart({
+        pending.hydrateInvokeAgentSpan({
           span: opened.span,
           traceId,
           sessionKey: eventSessionKey,
@@ -758,11 +758,12 @@ export function createWeaveService(
       return;
     }
     if (invokeAgents.lookup({ by: "traceId", value: traceId }) === closed) {
-      // Stamp final cost + drain all per-trace state. Unregister from every
-      // InvokeAgentIndex axis so post-finalize side-channel events
-      // (run.attempt / message_received / agent_end / session_end) become
-      // silent no-ops instead of addEvent'ing on a dead span.
-      pending.drainOnInvokeAgentEnd({ span: closed, traceId });
+      // Stamp final running totals on the invoke_agent and clear per-trace
+      // buckets. Unregister from every InvokeAgentIndex axis so post-finalize
+      // side-channel events (run.attempt / message_received / agent_end /
+      // session_end) become silent no-ops instead of addEvent'ing on a dead
+      // span.
+      pending.finalizeInvokeAgentSpan({ span: closed, traceId });
       invokeAgents.unregister(closed);
       invokeAgents.forgetSessionKey(traceId);
     }
