@@ -250,11 +250,20 @@ export function createWeaveService(
   let invokeAgents: InvokeAgentIndex | undefined;
   let pending: PendingTraceState | undefined;
   /**
-   * Subagent's own runId -> OTel span. Tracked separately from
-   * `SpanRegistry` because the lookup key is the subagent's runId, not its
-   * OpenClaw spanId (subagent_spawned/_ended hooks don't carry spanId).
+   * Spans for in-flight subagent invocations, keyed by the subagent's OWN
+   * runId — distinct from `InvokeAgentIndex.byRunId`, which is keyed by the
+   * *requester's* runId. The two namespaces are not interchangeable: a
+   * subagent's runId never appears in `InvokeAgentIndex` (subagents emit
+   * their model/tool spans in a separate trace), and a requester's runId
+   * never appears here.
+   *
+   * Tracked separately from `SpanRegistry` (rather than indexed by OpenClaw
+   * spanId) because the `subagent_spawned` / `subagent_ended` hooks don't
+   * carry a spanId — only the subagent's runId. Two operations on this map
+   * (set on start, delete on end), so a fourth class is overkill; the
+   * explicit identifier in the name carries the distinction.
    */
-  const subagentSpansByRunId = new Map<string, Span>();
+  const subagentSpansBySubagentRunId = new Map<string, Span>();
 
   let stopped = false;
   /** Read at start() time so env changes take effect on plugin reload. */
@@ -497,7 +506,7 @@ export function createWeaveService(
    */
   function startSubagentSpan(p: SubagentSpanStartParams): void {
     if (!spans || !invokeAgents || !resolvedCfg || stopped) return;
-    if (subagentSpansByRunId.has(p.subagentRunId)) return;
+    if (subagentSpansBySubagentRunId.has(p.subagentRunId)) return;
     const attrs: Record<string, string | number | boolean> = {
       "weave.operation.name": "invoke_agent",
       "weave.agent.name": p.agentId,
@@ -523,11 +532,11 @@ export function createWeaveService(
       debugContext: `requesterRunId=${p.requesterRunId ?? "<none>"} subagentRunId=${p.subagentRunId}`,
     });
     if (opened.kind !== "ok") return;
-    setBoundedMap(subagentSpansByRunId, p.subagentRunId, opened.span, MAX_ACTIVE_SPANS);
+    setBoundedMap(subagentSpansBySubagentRunId, p.subagentRunId, opened.span, MAX_ACTIVE_SPANS);
   }
 
   function endSubagentSpan(p: SubagentSpanEndParams): void {
-    const span = subagentSpansByRunId.get(p.subagentRunId);
+    const span = subagentSpansBySubagentRunId.get(p.subagentRunId);
     if (!span) return;
     if (p.outcome) span.setAttribute("weave.subagent.outcome", p.outcome);
     if (p.error) span.setAttribute("error.message", p.error);
@@ -537,7 +546,7 @@ export function createWeaveService(
       ...(p.error ? { message: p.error } : {}),
     });
     span.end(new Date(p.endTimeMs));
-    subagentSpansByRunId.delete(p.subagentRunId);
+    subagentSpansBySubagentRunId.delete(p.subagentRunId);
   }
 
   /**
@@ -906,14 +915,14 @@ export function createWeaveService(
     spans?.endAllRemaining();
     invokeAgents?.clear();
     pending?.clear();
-    for (const span of subagentSpansByRunId.values()) {
+    for (const span of subagentSpansBySubagentRunId.values()) {
       try {
         span.end();
       } catch {
         // ignore
       }
     }
-    subagentSpansByRunId.clear();
+    subagentSpansBySubagentRunId.clear();
     try {
       await provider?.shutdown();
     } catch {
