@@ -7,6 +7,7 @@ import {
   SpanKind,
   SpanStatusCode,
   trace,
+  type Context,
   type Span,
   type Tracer,
 } from "@opentelemetry/api";
@@ -494,24 +495,18 @@ export function createWeaveService(
 
   function emitCompactionSpan(p: CompactionSpanParams): void {
     if (!tracer || !resolvedCfg || stopped) return;
-    let parentCtx = otelContext.active();
-    let parentResolved = false;
-    if (p.parentOpenclawSpanId) {
-      const parentSpan = activeSpans.get(p.parentOpenclawSpanId);
-      if (parentSpan) {
-        parentCtx = trace.setSpan(parentCtx, parentSpan);
-        parentResolved = true;
-      }
-    }
-    // Orphan-drop: if a parent was claimed but not found, drop the span
-    // rather than letting it become a root (which would show as its own
-    // "turn" in Weave's Agents tab).
-    if (p.parentOpenclawSpanId && !parentResolved) {
-      debugLogger?.debug(
-        `[weave debug] drop-orphan span=context_compacted parentOpenclawSpanId=${p.parentOpenclawSpanId} reason=parent-not-in-activeSpans`,
-      );
-      return;
-    }
+    const parent = resolveParentContextOrDrop({
+      parentSpan: p.parentOpenclawSpanId
+        ? activeSpans.get(p.parentOpenclawSpanId)
+        : undefined,
+      claimsParent: !!p.parentOpenclawSpanId,
+      allowOrphanAsRoot: false,
+      spanName: "context_compacted",
+      dropDebugFields: `parentOpenclawSpanId=${p.parentOpenclawSpanId ?? "<none>"}`,
+      debugLogger,
+    });
+    if (parent.drop) return;
+    const parentCtx = parent.ctx;
     const attrs: Record<string, string | number | boolean> = {
       "weave.operation.name": "context_compacted",
       "weave.agent.name": p.agentName ?? resolvedCfg.agentName ?? "openclaw",
@@ -549,25 +544,22 @@ export function createWeaveService(
   function startSubagentSpan(p: SubagentSpanStartParams): void {
     if (!tracer || !resolvedCfg || stopped) return;
     if (subagentSpansByRunId.has(p.subagentRunId)) return;
-    let parentCtx = otelContext.active();
-    let parentResolved = false;
-    if (p.requesterRunId) {
-      const parentSpan = invokeAgentByRunId.get(p.requesterRunId);
-      if (parentSpan) {
-        parentCtx = trace.setSpan(parentCtx, parentSpan);
-        parentResolved = true;
-      }
-    }
-    // Orphan-drop: if the requester's invoke_agent isn't active, drop the
-    // subagent span. Letting it become a root would pollute Weave's Agents
-    // tab as a separate top-level "turn". (When p.requesterRunId is
-    // undefined the spawn is intentionally root-level — allowed.)
-    if (p.requesterRunId && !parentResolved) {
-      debugLogger?.debug(
-        `[weave debug] drop-orphan span=invoke_agent (subagent) requesterRunId=${p.requesterRunId} subagentRunId=${p.subagentRunId} reason=requester-invoke_agent-not-active`,
-      );
-      return;
-    }
+    // A subagent that claimed a requesterRunId but can't find the requester's
+    // invoke_agent is an orphan. Letting it become a root would pollute Weave's
+    // Agents tab as a separate top-level "turn". When p.requesterRunId is
+    // undefined the spawn is intentionally root-level — handled by claimsParent=false.
+    const parent = resolveParentContextOrDrop({
+      parentSpan: p.requesterRunId
+        ? invokeAgentByRunId.get(p.requesterRunId)
+        : undefined,
+      claimsParent: !!p.requesterRunId,
+      allowOrphanAsRoot: false,
+      spanName: `invoke_agent ${p.agentId} (subagent)`,
+      dropDebugFields: `requesterRunId=${p.requesterRunId ?? "<none>"} subagentRunId=${p.subagentRunId}`,
+      debugLogger,
+    });
+    if (parent.drop) return;
+    const parentCtx = parent.ctx;
     const attrs: Record<string, string | number | boolean> = {
       "weave.operation.name": "invoke_agent",
       "weave.agent.name": p.agentId,
@@ -759,29 +751,27 @@ export function createWeaveService(
       // same spanId (idempotent on duplicates).
       if (activeSpans.has(result.openclawSpanId)) return;
 
-      let parentCtx = otelContext.active();
-      let parentResolved = false;
-      if (result.openclawParentSpanId) {
-        const parentSpan = activeSpans.get(result.openclawParentSpanId);
-        if (parentSpan) {
-          parentCtx = trace.setSpan(parentCtx, parentSpan);
-          parentResolved = true;
-        }
-      }
-
-      const isInvokeAgent = result.spanName.startsWith("invoke_agent ");
-      const claimsParent = !!result.openclawParentSpanId;
       // Defensive orphan-drop: a child span (chat / execute_tool / etc.)
-      // that claims a parent but can't find it would otherwise be created
-      // as its own trace root, which Weave's Agents tab renders as a
-      // separate "turn" — making one agent run look like many. Drop it
-      // instead. invoke_agent is exempt because it's a legitimate root.
-      if (!isInvokeAgent && claimsParent && !parentResolved) {
-        debugLogger?.debug(
-          `[weave debug] drop-orphan span=${result.spanName} traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId} reason=parent-not-in-activeSpans`,
-        );
-        return;
-      }
+      // that claims a parent but can't find it would otherwise be created as
+      // its own trace root, which Weave's Agents tab renders as a separate
+      // "turn" — making one agent run look like many. invoke_agent is exempt
+      // (legitimate root) since its claimed parent may live upstream in
+      // OpenClaw's harness layer that we don't observe.
+      const isInvokeAgent = result.spanName.startsWith("invoke_agent ");
+      const parentSpan = result.openclawParentSpanId
+        ? activeSpans.get(result.openclawParentSpanId)
+        : undefined;
+      const parent = resolveParentContextOrDrop({
+        parentSpan,
+        claimsParent: !!result.openclawParentSpanId,
+        allowOrphanAsRoot: isInvokeAgent,
+        spanName: result.spanName,
+        dropDebugFields: `traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId ?? "<none>"}`,
+        debugLogger,
+      });
+      if (parent.drop) return;
+      const parentCtx = parent.ctx;
+      const parentResolved = !!parentSpan;
 
       debugLogger?.debug(
         `[weave debug] span-create name=${result.spanName} traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId ?? "<none>"} parentResolved=${parentResolved}`,
@@ -1191,6 +1181,60 @@ function addBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, cap: number): voi
     }
   }
   map.set(key, value);
+}
+
+/**
+ * Result of {@link resolveParentContextOrDrop}: either continue with an OTel
+ * context to attach the new span to, or drop the span as an orphan.
+ */
+export type ResolveParentResult =
+  | { drop: false; ctx: Context }
+  | { drop: true };
+
+/**
+ * Single source of truth for the orphan-drop policy. Previously inlined in
+ * three places (emitCompactionSpan, startSubagentSpan, and the mapper-path
+ * branch in handleEvent), each with a slightly different debug message and a
+ * subtly different "what counts as a legitimate root" rule. Centralising
+ * prevents drift when new emit paths are added.
+ *
+ * Policy:
+ *   - claimsParent=false                              -> root under active ctx
+ *   - claimsParent=true,  parentSpan resolved         -> child of parentSpan
+ *   - claimsParent=true,  parentSpan undefined,
+ *       allowOrphanAsRoot=true                        -> root under active ctx
+ *       allowOrphanAsRoot=false                       -> drop (logs via debugLogger)
+ *
+ * `allowOrphanAsRoot` lets the top-level invoke_agent become a root even when
+ * its trace.parentSpanId points at an upstream OpenClaw harness span we don't
+ * track. Child spans (chat / execute_tool / context_compacted / subagent)
+ * always drop when their claimed parent isn't active — promoting them to root
+ * would render in Weave's Agents tab as a separate top-level "turn", making
+ * one agent run look like many.
+ *
+ * Callers do the parent lookup themselves because the three sites read from
+ * different maps (activeSpans for the mapper/compaction paths,
+ * invokeAgentByRunId for subagents).
+ *
+ * @internal exported for tests.
+ */
+export function resolveParentContextOrDrop(args: {
+  parentSpan: Span | undefined;
+  claimsParent: boolean;
+  allowOrphanAsRoot: boolean;
+  spanName: string;
+  /** Pre-built `key=value key=value` string included in the drop debug log. */
+  dropDebugFields: string;
+  debugLogger: { debug: (msg: string) => void } | undefined;
+}): ResolveParentResult {
+  const active = otelContext.active();
+  if (!args.claimsParent) return { drop: false, ctx: active };
+  if (args.parentSpan) return { drop: false, ctx: trace.setSpan(active, args.parentSpan) };
+  if (args.allowOrphanAsRoot) return { drop: false, ctx: active };
+  args.debugLogger?.debug(
+    `[weave debug] drop-orphan span=${args.spanName} ${args.dropDebugFields} reason=parent-not-resolved`,
+  );
+  return { drop: true };
 }
 
 function clampFlushInterval(raw: unknown): number {
