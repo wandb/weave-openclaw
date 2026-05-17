@@ -7,6 +7,7 @@ import {
   trace as otelTrace,
   type Span,
   type SpanKind,
+  type SpanStatusCode,
   type Tracer,
 } from "@opentelemetry/api";
 import { setBoundedMap } from "./bounded-map.js";
@@ -72,8 +73,7 @@ export type OpenSpanResult =
 export type CloseSpanParams = {
   openclawSpanId: string;
   endTimeMs: number;
-  /** OTel SpanStatusCode (`UNSET=0`, `OK=1`, `ERROR=2`). */
-  statusCode: 0 | 1 | 2;
+  statusCode: SpanStatusCode;
   statusMessage?: string;
   /** Additional attrs to set immediately before ending the span. */
   attrs?: Record<string, string | number | boolean>;
