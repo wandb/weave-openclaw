@@ -35,8 +35,8 @@ replaceFirstMatch(
 );
 
 replaceFirstMatch(
-  "src/service.ts",
-  /(const PACKAGE_VERSION\s*=\s*")[^"]+(")/,
+  "src/version.ts",
+  /(export const PACKAGE_VERSION\s*=\s*")[^"]+(")/,
   `$1${nextVersion}$2`,
 );
 

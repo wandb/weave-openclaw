@@ -40,9 +40,8 @@ import {
   type RawWeavePluginConfig,
   type ResolvedWeavePluginConfig,
 } from "./types.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "./version.js";
 
-const PACKAGE_NAME = "weave-openclaw";
-const PACKAGE_VERSION = "0.0.1";
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 
 /**
