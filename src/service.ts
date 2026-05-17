@@ -3,11 +3,8 @@
 // SPDX-PackageName: weave-openclaw
 
 import {
-  context as otelContext,
   SpanKind,
   SpanStatusCode,
-  trace,
-  type Context,
   type Span,
   type Tracer,
 } from "@opentelemetry/api";
@@ -29,13 +26,17 @@ import {
   type DiagnosticEventPayload,
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
+import { setBoundedMap } from "./bounded-map.js";
 import { applyGenAiAliases, mapDiagnosticEventToWeaveSpan } from "./event-mapper.js";
 import { buildExporterHeaders } from "./exporter-headers.js";
 import { createExporterObserver } from "./exporter-observer.js";
 import type { WeaveHookState } from "./hook-state.js";
+import { InvokeAgentIndex } from "./invoke-agent-index.js";
+import { PendingTraceState } from "./pending-trace-state.js";
 import { sanitizeAttrString } from "./redact.js";
 import { resolveWandbApiKey } from "./resolve-auth.js";
 import { resolveWeaveEndpoint } from "./resolve-endpoint.js";
+import { SpanRegistry, type DebugLogger } from "./span-registry.js";
 import {
   resolveContentCapture,
   type RawWeavePluginConfig,
@@ -102,8 +103,8 @@ const MIN_FLUSH_INTERVAL_MS = 1000;
 /**
  * Soft caps on internal Maps to prevent unbounded growth if the diagnostic
  * event stream stops mid-flight (gateway crash, dropped conversation, etc.).
- * Both Maps preserve insertion order, so eviction is FIFO — the oldest entry
- * is dropped first.
+ * Maps preserve insertion order, so eviction is FIFO — the oldest entry is
+ * dropped first.
  */
 const MAX_ACTIVE_SPANS = 4096;
 const MAX_TRACE_SESSION_KEYS = 4096;
@@ -218,11 +219,24 @@ export type SessionEndParams = {
  * as the OTel global. This is what lets us coexist with `diagnostics-otel`
  * (which calls `NodeSDK.start()` and would conflict with a second global).
  *
- * Returns the registrable plugin service plus a `emitCompactionSpan`
- * side-channel callback. Compaction has no matching diagnostic event, so the
- * plugin entry's `after_compaction` hook calls this directly to push a
- * one-shot `context_compacted` span (parented under the active invoke_agent
- * when its `openclawSpanId` is supplied).
+ * In-flight state is split across three owners (instantiated at start(),
+ * cleared at stop()):
+ *
+ *   - `SpanRegistry` — every indexed span keyed by OpenClaw spanId, plus the
+ *     parent-resolution + orphan-drop policy for new spans. All emit sites
+ *     (mapper-driven, compaction, subagent) route through it.
+ *   - `InvokeAgentIndex` — invoke_agent root spans indexed by traceId / runId
+ *     / sessionKey, so non-mapper emit sites (session, message_received,
+ *     subagent, model.usage, tool.loop) can find the right span by whichever
+ *     id their hook payload carries.
+ *   - `PendingTraceState` — buffers for side-channel data that may arrive
+ *     before its invoke_agent span exists (cost, aggregate usage, tool.loop
+ *     events, context snapshots, session_start). Drained at invoke_agent
+ *     start; final cost stamped at invoke_agent end.
+ *
+ * Returns the registrable plugin service plus several side-channel callbacks
+ * the plugin entry calls from `api.on(...)` hooks that don't have matching
+ * diagnostic events (compaction, subagent, message_received, session, etc.).
  */
 export function createWeaveService(
   params: CreateWeaveServiceParams,
@@ -231,83 +245,22 @@ export function createWeaveService(
   let tracer: Tracer | undefined;
   let unsubscribe: (() => void) | undefined;
   let resolvedCfg: ResolvedWeavePluginConfig | undefined;
-  /** OpenClaw-spanId -> live OTel Span (so children can resolve their parent). */
-  const activeSpans = new Map<string, Span>();
-  /** OpenClaw traceId -> sessionKey learned from any prior event in the trace. */
-  const sessionKeysByTrace = new Map<string, string>();
+
+  let spans: SpanRegistry | undefined;
+  let invokeAgents: InvokeAgentIndex | undefined;
+  let pending: PendingTraceState | undefined;
   /**
-   * OpenClaw traceId -> live invoke_agent root span. Used to attach side-channel
-   * data (cost from model.usage, tool.loop span events) to the right run.
-   * If multiple invoke_agent roots exist for the same trace, the most recent
-   * wins — subsequent subagent invoke_agent spans are children, not roots.
+   * Subagent's own runId -> OTel span. Tracked separately from
+   * `SpanRegistry` because the lookup key is the subagent's runId, not its
+   * OpenClaw spanId (subagent_spawned/_ended hooks don't carry spanId).
    */
-  const invokeAgentByTrace = new Map<string, Span>();
-  /**
-   * runId -> live invoke_agent root span. Used by subagent_spawned hook
-   * (which only carries runId, not traceId) to find the requester's parent
-   * span for linkage.
-   */
-  const invokeAgentByRunId = new Map<string, Span>();
-  /** Subagent's own runId -> live OTel span tracking that subagent invocation. */
   const subagentSpansByRunId = new Map<string, Span>();
-  /**
-   * sessionKey -> live invoke_agent span. Used for session_start / session_end
-   * hooks (which carry sessionKey, not runId or trace) so we can attach
-   * session-lifecycle events to the right run. The plugin updates this on
-   * invoke_agent start and clears on finalize.
-   */
-  const invokeAgentBySessionKey = new Map<string, Span>();
-  /**
-   * Buffered session_start events by sessionKey for stamping on the NEXT
-   * invoke_agent that starts with that sessionKey (session_start typically
-   * fires before the first run of a session is born).
-   */
-  const pendingSessionStartByKey = new Map<
-    string,
-    { resumedFrom?: string }
-  >();
-  /**
-   * Cumulative cost in USD by traceId, accumulated from model.usage events.
-   * Tracked independently of `invokeAgentByTrace` because side-channel events
-   * (model.usage, tool.loop) can arrive before the invoke_agent span exists
-   * if the runtime emits them before the queue drains the run.started event.
-   * The cumulative is applied to the span on start (if pending) and on
-   * finalize (always, as the authoritative final value).
-   */
-  const cumulativeCostByTrace = new Map<string, number>();
-  /**
-   * Latest aggregate-token totals from model.usage by traceId, applied to the
-   * invoke_agent span on start (if pending) and on finalize.
-   */
-  const aggregateUsageByTrace = new Map<string, Record<string, number>>();
-  /**
-   * Buffered tool.loop events by traceId for the same async/sync ordering
-   * reason as cost. Drained as span events when invoke_agent starts.
-   */
-  const pendingToolLoopsByTrace = new Map<
-    string,
-    Array<{ name: "tool.loop"; attrs: Record<string, string | number | boolean> }>
-  >();
-  /**
-   * Latest context.assembled snapshot per traceId, applied to the invoke_agent
-   * span on start (if pending) and refreshed mid-flight on every event.
-   */
-  const pendingContextByTrace = new Map<string, Record<string, number>>();
+
   let stopped = false;
   /** Read at start() time so env changes take effect on plugin reload. */
-  let debugSpans = false;
   let debugTraceTree = false;
-  /** Logger captured from ctx for use inside handleEvent (which isn't a closure over ctx). */
-  let debugLogger: { debug: (msg: string) => void } | undefined;
-  /**
-   * Per-span metadata tracked alongside `activeSpans` so the trace-tree
-   * debug dump can render parent/child structure (the OTel Span API doesn't
-   * expose parentSpanId or name).
-   */
-  const spanMetaByOpenclawSpanId = new Map<
-    string,
-    { name: string; parentOpenclawSpanId?: string }
-  >();
+  /** Wired into SpanRegistry; logs span-create / orphan-drop / trace-tree. */
+  let debugLogger: DebugLogger | undefined;
 
   const service: OpenClawPluginService = {
     id: "weave",
@@ -321,9 +274,8 @@ export function createWeaveService(
 
       stopped = false;
       const flags = parseDebugFlags(process.env.OPENCLAW_WEAVE_DEBUG);
-      debugSpans = flags.spans;
       debugTraceTree = flags.traceTree;
-      if (debugSpans || debugTraceTree) {
+      if (flags.spans || flags.traceTree) {
         const log = ctx.logger;
         debugLogger = {
           debug: (msg: string) => {
@@ -402,6 +354,9 @@ export function createWeaveService(
       // local so we don't fight diagnostics-otel for the global TracerProvider.
 
       tracer = provider.getTracer(PACKAGE_NAME, PACKAGE_VERSION);
+      spans = new SpanRegistry(tracer, MAX_ACTIVE_SPANS, debugLogger);
+      invokeAgents = new InvokeAgentIndex(MAX_TRACE_SESSION_KEYS);
+      pending = new PendingTraceState(MAX_TRACE_SESSION_KEYS);
 
       const resolvedAgentVersion = resolveAgentVersion(raw.agentVersion);
       resolvedCfg = {
@@ -494,19 +449,7 @@ export function createWeaveService(
   };
 
   function emitCompactionSpan(p: CompactionSpanParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
-    const parent = resolveParentContextOrDrop({
-      parentSpan: p.parentOpenclawSpanId
-        ? activeSpans.get(p.parentOpenclawSpanId)
-        : undefined,
-      claimsParent: !!p.parentOpenclawSpanId,
-      allowOrphanAsRoot: false,
-      spanName: "context_compacted",
-      dropDebugFields: `parentOpenclawSpanId=${p.parentOpenclawSpanId ?? "<none>"}`,
-      debugLogger,
-    });
-    if (parent.drop) return;
-    const parentCtx = parent.ctx;
+    if (!spans || !resolvedCfg || stopped) return;
     const attrs: Record<string, string | number | boolean> = {
       "weave.operation.name": "context_compacted",
       "weave.agent.name": p.agentName ?? resolvedCfg.agentName ?? "openclaw",
@@ -521,45 +464,40 @@ export function createWeaveService(
       attrs["weave.compaction.summary"] = `${p.itemsBefore} -> ${p.itemsAfter}`;
     }
     if (resolvedCfg.emitGenAiAliases) applyGenAiAliases(attrs);
-    const span = tracer.startSpan(
-      "context_compacted",
-      {
-        kind: SpanKind.INTERNAL,
-        attributes: attrs,
-        startTime: new Date(p.startTimeMs),
-      },
-      parentCtx,
-    );
-    span.end(new Date(p.endTimeMs));
+
+    const opened = spans.openSpan({
+      spanName: "context_compacted",
+      spanKind: SpanKind.INTERNAL,
+      openclawParentSpanId: p.parentOpenclawSpanId,
+      parentSpan: p.parentOpenclawSpanId
+        ? spans.get(p.parentOpenclawSpanId)
+        : undefined,
+      claimsParent: !!p.parentOpenclawSpanId,
+      allowRootless: false,
+      attrs,
+      startTimeMs: p.startTimeMs,
+      debugContext: `parentOpenclawSpanId=${p.parentOpenclawSpanId ?? "<none>"}`,
+    });
+    if (opened.kind !== "ok") return;
+    opened.span.end(new Date(p.endTimeMs));
   }
 
   /**
    * Start a `invoke_agent <agentId>` span representing a subagent invocation.
    * Parented under the requester's invoke_agent (looked up via runId) so
-   * multi-agent workflows render hierarchically in Weave's Agents tab.
-   * The subagent's own model/tool spans land in a separate trace (its own
-   * harness emits them) — this span just brackets the spawn-to-end window
-   * in the requester's view.
+   * multi-agent workflows render hierarchically in Weave's Agents tab. The
+   * subagent's own model/tool spans live in a separate trace (its own
+   * harness emits them) — this span brackets the spawn-to-end window in the
+   * requester's view.
+   *
+   * When `requesterRunId` is undefined, the spawn is intentionally root-level
+   * (standalone session-mode subagent) and allowed. When it's set but the
+   * requester's invoke_agent isn't active, the span is orphan-dropped to
+   * avoid polluting Weave's Agents tab with a separate top-level "turn".
    */
   function startSubagentSpan(p: SubagentSpanStartParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
+    if (!spans || !invokeAgents || !resolvedCfg || stopped) return;
     if (subagentSpansByRunId.has(p.subagentRunId)) return;
-    // A subagent that claimed a requesterRunId but can't find the requester's
-    // invoke_agent is an orphan. Letting it become a root would pollute Weave's
-    // Agents tab as a separate top-level "turn". When p.requesterRunId is
-    // undefined the spawn is intentionally root-level — handled by claimsParent=false.
-    const parent = resolveParentContextOrDrop({
-      parentSpan: p.requesterRunId
-        ? invokeAgentByRunId.get(p.requesterRunId)
-        : undefined,
-      claimsParent: !!p.requesterRunId,
-      allowOrphanAsRoot: false,
-      spanName: `invoke_agent ${p.agentId} (subagent)`,
-      dropDebugFields: `requesterRunId=${p.requesterRunId ?? "<none>"} subagentRunId=${p.subagentRunId}`,
-      debugLogger,
-    });
-    if (parent.drop) return;
-    const parentCtx = parent.ctx;
     const attrs: Record<string, string | number | boolean> = {
       "weave.operation.name": "invoke_agent",
       "weave.agent.name": p.agentId,
@@ -570,16 +508,22 @@ export function createWeaveService(
     if (p.label) attrs["weave.agent.description"] = p.label;
     if (resolvedCfg.agentVersion) attrs["weave.agent.version"] = resolvedCfg.agentVersion;
     if (resolvedCfg.emitGenAiAliases) applyGenAiAliases(attrs);
-    const span = tracer.startSpan(
-      `invoke_agent ${p.agentId}`,
-      {
-        kind: SpanKind.INTERNAL,
-        attributes: attrs,
-        startTime: new Date(p.startTimeMs),
-      },
-      parentCtx,
-    );
-    addBoundedMap(subagentSpansByRunId, p.subagentRunId, span, MAX_ACTIVE_SPANS);
+
+    const parentSpan = p.requesterRunId
+      ? invokeAgents.lookup({ by: "runId", value: p.requesterRunId })
+      : undefined;
+    const opened = spans.openSpan({
+      spanName: `invoke_agent ${p.agentId}`,
+      spanKind: SpanKind.INTERNAL,
+      parentSpan,
+      claimsParent: !!p.requesterRunId,
+      allowRootless: false,
+      attrs,
+      startTimeMs: p.startTimeMs,
+      debugContext: `requesterRunId=${p.requesterRunId ?? "<none>"} subagentRunId=${p.subagentRunId}`,
+    });
+    if (opened.kind !== "ok") return;
+    setBoundedMap(subagentSpansByRunId, p.subagentRunId, opened.span, MAX_ACTIVE_SPANS);
   }
 
   function endSubagentSpan(p: SubagentSpanEndParams): void {
@@ -603,8 +547,8 @@ export function createWeaveService(
    * always; emits the final assistant text only when captureContent is enabled.
    */
   function emitAgentEndSummary(p: AgentEndSummaryParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
-    const span = invokeAgentByRunId.get(p.runId);
+    if (!invokeAgents || !resolvedCfg || stopped) return;
+    const span = invokeAgents.lookup({ by: "runId", value: p.runId });
     if (!span) return;
     const attrs: Record<string, string | number | boolean> = {
       "weave.agent.success": p.success,
@@ -629,10 +573,12 @@ export function createWeaveService(
    * is only emitted when content capture is enabled.
    */
   function emitMessageReceived(p: MessageReceivedParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
+    if (!invokeAgents || !resolvedCfg || stopped) return;
     let span: Span | undefined;
-    if (p.runId) span = invokeAgentByRunId.get(p.runId);
-    if (!span && p.sessionKey) span = invokeAgentBySessionKey.get(p.sessionKey);
+    if (p.runId) span = invokeAgents.lookup({ by: "runId", value: p.runId });
+    if (!span && p.sessionKey) {
+      span = invokeAgents.lookup({ by: "sessionKey", value: p.sessionKey });
+    }
     if (!span) return;
     const attrs: Record<string, string | number | boolean> = {
       "weave.message.from": p.from,
@@ -652,20 +598,15 @@ export function createWeaveService(
    * invoke_agent that starts with the matching sessionKey.
    */
   function emitSessionStart(p: SessionStartParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
-    const span = invokeAgentBySessionKey.get(p.sessionKey);
+    if (!invokeAgents || !pending || !resolvedCfg || stopped) return;
+    const span = invokeAgents.lookup({ by: "sessionKey", value: p.sessionKey });
     if (span) {
       const attrs: Record<string, string | number | boolean> = {};
       if (p.resumedFrom) attrs["weave.session.resumed_from"] = p.resumedFrom;
       span.addEvent("session_started", attrs);
       return;
     }
-    addBoundedMap(
-      pendingSessionStartByKey,
-      p.sessionKey,
-      { resumedFrom: p.resumedFrom },
-      MAX_TRACE_SESSION_KEYS,
-    );
+    pending.bufferSessionStart(p.sessionKey, { resumedFrom: p.resumedFrom });
   }
 
   /**
@@ -674,8 +615,8 @@ export function createWeaveService(
    * already finalized, the event is dropped (no anchor).
    */
   function emitSessionEnd(p: SessionEndParams): void {
-    if (!tracer || !resolvedCfg || stopped) return;
-    const span = invokeAgentBySessionKey.get(p.sessionKey);
+    if (!invokeAgents || !resolvedCfg || stopped) return;
+    const span = invokeAgents.lookup({ by: "sessionKey", value: p.sessionKey });
     if (!span) return;
     const attrs: Record<string, string | number | boolean> = {};
     if (p.reason) attrs["weave.session.reason"] = p.reason;
@@ -703,7 +644,7 @@ export function createWeaveService(
     event: DiagnosticEventPayload,
     _meta: DiagnosticEventMetadata,
   ): void {
-    if (!tracer || !resolvedCfg) return;
+    if (!spans || !invokeAgents || !pending || !resolvedCfg) return;
 
     const traceId = event.trace?.traceId;
     if (!traceId) {
@@ -713,32 +654,33 @@ export function createWeaveService(
 
     // Learn sessionKey from any event that carries it; reuse it on subsequent
     // events in the same trace that drop the field (common for tool spans).
-    const eventSessionKey = (event as unknown as { sessionKey?: unknown }).sessionKey;
-    if (typeof eventSessionKey === "string" && eventSessionKey.length > 0) {
-      addBoundedMap(sessionKeysByTrace, traceId, eventSessionKey, MAX_TRACE_SESSION_KEYS);
+    const e = event as unknown as Record<string, unknown>;
+    const eventSessionKey = nonEmptyString(e.sessionKey);
+    if (eventSessionKey) {
+      invokeAgents.learnSessionKey(traceId, eventSessionKey);
     }
 
-    // Side-channel events: model.usage and tool.loop attach to the active
-    // invoke_agent rather than producing their own span. Handle these BEFORE
-    // the mapper so we can short-circuit cleanly.
+    // Side-channel events attach to the active invoke_agent rather than
+    // producing their own span. Handle these BEFORE the mapper so we can
+    // short-circuit cleanly.
     if (event.type === "model.usage") {
-      handleModelUsage(event as unknown as Record<string, unknown>, traceId);
+      handleModelUsage(e, traceId);
       return;
     }
     if (event.type === "tool.loop") {
-      handleToolLoop(event as unknown as Record<string, unknown>, traceId);
+      handleToolLoop(e, traceId);
       return;
     }
     if (event.type === "context.assembled") {
-      handleContextAssembled(event as unknown as Record<string, unknown>, traceId);
+      handleContextAssembled(e, traceId);
       return;
     }
     if (event.type === "run.attempt") {
-      handleRunAttempt(event as unknown as Record<string, unknown>);
+      handleRunAttempt(e);
       return;
     }
 
-    const conversationIdHint = sessionKeysByTrace.get(traceId);
+    const conversationIdHint = invokeAgents.sessionKeyForTrace(traceId);
 
     const result = mapDiagnosticEventToWeaveSpan(event, resolvedCfg, {
       hookState: params.hookState,
@@ -747,221 +689,145 @@ export function createWeaveService(
     if (result.kind === "skip") return;
 
     if (result.kind === "start") {
-      // Don't double-create if we somehow see two `started` events for the
-      // same spanId (idempotent on duplicates).
-      if (activeSpans.has(result.openclawSpanId)) return;
-
-      // Defensive orphan-drop: a child span (chat / execute_tool / etc.)
-      // that claims a parent but can't find it would otherwise be created as
-      // its own trace root, which Weave's Agents tab renders as a separate
-      // "turn" — making one agent run look like many. invoke_agent is exempt
-      // (legitimate root) since its claimed parent may live upstream in
-      // OpenClaw's harness layer that we don't observe.
       const isInvokeAgent = result.spanName.startsWith("invoke_agent ");
       const parentSpan = result.openclawParentSpanId
-        ? activeSpans.get(result.openclawParentSpanId)
+        ? spans.get(result.openclawParentSpanId)
         : undefined;
-      const parent = resolveParentContextOrDrop({
+      const opened = spans.openSpan({
+        spanName: result.spanName,
+        spanKind: result.spanKind,
+        openclawSpanId: result.openclawSpanId,
+        openclawParentSpanId: result.openclawParentSpanId,
         parentSpan,
         claimsParent: !!result.openclawParentSpanId,
-        allowOrphanAsRoot: isInvokeAgent,
-        spanName: result.spanName,
-        dropDebugFields: `traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId ?? "<none>"}`,
-        debugLogger,
+        // invoke_agent is exempt from orphan-drop because its claimed parent
+        // may live upstream in OpenClaw's harness layer we don't observe.
+        // Child spans (chat / execute_tool / context_compacted / subagent)
+        // always drop when their claimed parent isn't active.
+        allowRootless: isInvokeAgent,
+        attrs: result.attrs,
+        startTimeMs: result.startTimeMs,
+        debugContext: `traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId ?? "<none>"}`,
       });
-      if (parent.drop) return;
-      const parentCtx = parent.ctx;
-      const parentResolved = !!parentSpan;
+      if (opened.kind !== "ok") return;
+      if (debugTraceTree) spans.dumpTree(`start ${result.openclawSpanId}`);
 
-      debugLogger?.debug(
-        `[weave debug] span-create name=${result.spanName} traceId=${traceId} spanId=${result.openclawSpanId} parentSpanId=${result.openclawParentSpanId ?? "<none>"} parentResolved=${parentResolved}`,
-      );
-
-      const span = tracer.startSpan(
-        result.spanName,
-        {
-          kind: result.spanKind,
-          attributes: result.attrs,
-          startTime: new Date(result.startTimeMs),
-        },
-        parentCtx,
-      );
-      addBoundedMap(activeSpans, result.openclawSpanId, span, MAX_ACTIVE_SPANS);
-      spanMetaByOpenclawSpanId.set(result.openclawSpanId, {
-        name: result.spanName,
-        parentOpenclawSpanId: result.openclawParentSpanId,
-      });
-      if (debugTraceTree) {
-        dumpTraceTree(`start ${result.openclawSpanId}`);
-      }
-      // Track invoke_agent roots by traceId for cost / tool.loop attachment.
-      if (result.spanName.startsWith("invoke_agent ")) {
-        invokeAgentByTrace.set(traceId, span);
-        const eventRunId = (event as Record<string, unknown>).runId;
-        if (typeof eventRunId === "string" && eventRunId.length > 0) {
-          addBoundedMap(invokeAgentByRunId, eventRunId, span, MAX_ACTIVE_SPANS);
-        }
-        const eventSessionKey = (event as Record<string, unknown>).sessionKey;
-        if (typeof eventSessionKey === "string" && eventSessionKey.length > 0) {
-          addBoundedMap(invokeAgentBySessionKey, eventSessionKey, span, MAX_ACTIVE_SPANS);
-          // Drain pending session_start for this sessionKey.
-          const pending = pendingSessionStartByKey.get(eventSessionKey);
-          if (pending) {
-            const evAttrs: Record<string, string | number | boolean> = {};
-            if (pending.resumedFrom) {
-              evAttrs["weave.session.resumed_from"] = pending.resumedFrom;
-            }
-            span.addEvent("session_started", evAttrs);
-            pendingSessionStartByKey.delete(eventSessionKey);
-          }
-        }
-        // Replay any side-channel data that arrived before this span existed.
-        // model.usage / tool.loop dispatch synchronously, so a usage event for
-        // a run can fire before downstream listeners observe the run.started
-        // span (if a sync emitter races ahead in the same tick).
-        const pendingCost = cumulativeCostByTrace.get(traceId);
-        if (typeof pendingCost === "number" && Number.isFinite(pendingCost)) {
-          span.setAttribute("weave.cost.usd", pendingCost);
-        }
-        const pendingUsage = aggregateUsageByTrace.get(traceId);
-        if (pendingUsage) {
-          for (const [k, v] of Object.entries(pendingUsage)) {
-            span.setAttribute(k, v);
-          }
-        }
-        const pendingLoops = pendingToolLoopsByTrace.get(traceId);
-        if (pendingLoops) {
-          for (const ev of pendingLoops) {
-            span.addEvent(ev.name, ev.attrs);
-          }
-          pendingToolLoopsByTrace.delete(traceId);
-        }
-        const pendingContext = pendingContextByTrace.get(traceId);
-        if (pendingContext) {
-          for (const [k, v] of Object.entries(pendingContext)) {
-            span.setAttribute(k, v);
-          }
-        }
+      if (isInvokeAgent) {
+        const eventRunId = nonEmptyString(e.runId);
+        invokeAgents.register({
+          span: opened.span,
+          traceId,
+          runId: eventRunId,
+          sessionKey: eventSessionKey,
+        });
+        pending.drainOnInvokeAgentStart({
+          span: opened.span,
+          traceId,
+          sessionKey: eventSessionKey,
+        });
       }
       return;
     }
 
     // result.kind === "finalize"
-    const span = activeSpans.get(result.openclawSpanId);
-    if (!span) {
+    const exceptionEvent =
+      result.status === "error"
+        ? {
+            name: result.errorType ?? "error",
+            // Per OTel spec (`docs/general/recording-errors.md`): set status,
+            // set error.type, AND record an exception event with
+            // `exception.{type,message}`. The diagnostic-event payload carries
+            // categorical info (errorType, failureKind, phase, deniedReason)
+            // but not the original throwable — synthesise an exception event
+            // from the structured fields so OTel-aware UIs (Honeycomb's
+            // exceptions tab, Datadog's error inspector) light up correctly.
+            message: synthesiseExceptionMessage(result.errorType, result.attrs),
+          }
+        : undefined;
+    const closed = spans.closeSpan({
+      openclawSpanId: result.openclawSpanId,
+      endTimeMs: result.endTimeMs,
+      statusCode:
+        result.status === "ok" ? SpanStatusCode.OK : SpanStatusCode.ERROR,
+      statusMessage: result.errorType,
+      attrs: result.attrs,
+      exception: exceptionEvent,
+    });
+    if (!closed) {
       // Started before our subscription, or we already finalized this span.
-      // Drop quietly to avoid log noise.
       return;
     }
-
-    // If finalizing an invoke_agent, stamp the cumulative cost (if any
-    // model.usage events landed on this trace) and clear ALL bookkeeping
-    // maps that reference this span — otherwise post-finalize events
-    // (run.attempt / message_received / agent_end / session_end) would
-    // addEvent on a dead span.
-    if (invokeAgentByTrace.get(traceId) === span) {
-      const totalCost = cumulativeCostByTrace.get(traceId);
-      if (typeof totalCost === "number" && Number.isFinite(totalCost)) {
-        span.setAttribute("weave.cost.usd", totalCost);
-      }
-      invokeAgentByTrace.delete(traceId);
-      cumulativeCostByTrace.delete(traceId);
-      aggregateUsageByTrace.delete(traceId);
-      pendingContextByTrace.delete(traceId);
-      for (const [k, v] of invokeAgentByRunId) {
-        if (v === span) invokeAgentByRunId.delete(k);
-      }
-      for (const [k, v] of invokeAgentBySessionKey) {
-        if (v === span) invokeAgentBySessionKey.delete(k);
-      }
+    if (invokeAgents.lookup({ by: "traceId", value: traceId }) === closed) {
+      // Stamp final cost + drain all per-trace state. Unregister from every
+      // InvokeAgentIndex axis so post-finalize side-channel events
+      // (run.attempt / message_received / agent_end / session_end) become
+      // silent no-ops instead of addEvent'ing on a dead span.
+      pending.drainOnInvokeAgentEnd({ span: closed, traceId });
+      invokeAgents.unregister(closed);
+      invokeAgents.forgetSessionKey(traceId);
     }
-
-    if (Object.keys(result.attrs).length > 0) {
-      span.setAttributes(result.attrs);
-    }
-    if (result.status === "error") {
-      // Per OTel spec (`docs/general/recording-errors.md`): set status,
-      // set error.type, AND record an exception event with
-      // `exception.{type,message}`. The diagnostic-event payload carries
-      // categorical info (errorType, failureKind, phase, deniedReason) but
-      // not the original throwable — we synthesise an exception event from
-      // the structured fields so OTel-aware UIs (Honeycomb's exceptions
-      // tab, Datadog's error inspector) light up correctly.
-      span.recordException({
-        name: result.errorType ?? "error",
-        message: synthesiseExceptionMessage(result.errorType, result.attrs),
-      });
-    }
-    span.setStatus({
-      code: result.status === "ok" ? SpanStatusCode.OK : SpanStatusCode.ERROR,
-      ...(result.errorType ? { message: result.errorType } : {}),
-    });
-    span.end(new Date(result.endTimeMs));
-    activeSpans.delete(result.openclawSpanId);
-    spanMetaByOpenclawSpanId.delete(result.openclawSpanId);
-
-    if (debugTraceTree) {
-      dumpTraceTree(`finalize ${result.openclawSpanId}`);
-    }
+    if (debugTraceTree) spans.dumpTree(`finalize ${result.openclawSpanId}`);
   }
 
   /**
    * Accumulate cost + aggregate-token attrs from a model.usage event for
-   * this trace. Cost is summed across multiple model.usage events. If an
-   * invoke_agent span already exists for the trace, attrs are also written
-   * directly so they're visible mid-flight; otherwise, they're stamped when
-   * the invoke_agent eventually starts (or, at the latest, when it finalizes).
+   * this trace. Cost is summed across multiple model.usage events; aggregate
+   * usage and context numbers are merged. If an invoke_agent span already
+   * exists for the trace, attrs are also written directly so they're visible
+   * mid-flight; otherwise they're stamped when the invoke_agent eventually
+   * starts (or, at the latest, when it finalizes).
    */
   function handleModelUsage(e: Record<string, unknown>, traceId: string): void {
+    if (!invokeAgents || !pending) return;
     const cost = e.costUsd;
+    let total: number | undefined;
     if (typeof cost === "number" && Number.isFinite(cost)) {
-      const prev = cumulativeCostByTrace.get(traceId) ?? 0;
-      const total = prev + cost;
-      addBoundedMap(cumulativeCostByTrace, traceId, total, MAX_TRACE_SESSION_KEYS);
+      total = pending.addCost(traceId, cost);
+    } else {
+      total = pending.getCost(traceId);
     }
-    const aggregate = aggregateUsageByTrace.get(traceId) ?? {};
+    const patch: Record<string, number> = {};
     const usage = e.usage as Record<string, unknown> | undefined;
     if (usage && typeof usage === "object") {
-      collectInt(aggregate, "weave.usage.total.input_tokens", usage.input);
-      collectInt(aggregate, "weave.usage.total.output_tokens", usage.output);
-      collectInt(aggregate, "weave.usage.total.cache_read.input_tokens", usage.cacheRead);
+      collectInt(patch, "weave.usage.total.input_tokens", usage.input);
+      collectInt(patch, "weave.usage.total.output_tokens", usage.output);
+      collectInt(patch, "weave.usage.total.cache_read.input_tokens", usage.cacheRead);
       collectInt(
-        aggregate,
+        patch,
         "weave.usage.total.cache_creation.input_tokens",
         usage.cacheWrite,
       );
-      collectInt(aggregate, "weave.usage.total.tokens", usage.total);
+      collectInt(patch, "weave.usage.total.tokens", usage.total);
     }
     const ctx = e.context as Record<string, unknown> | undefined;
     if (ctx && typeof ctx === "object") {
-      collectInt(aggregate, "weave.context.budget_tokens", ctx.limit);
-      collectInt(aggregate, "weave.context.used_tokens", ctx.used);
+      collectInt(patch, "weave.context.budget_tokens", ctx.limit);
+      collectInt(patch, "weave.context.used_tokens", ctx.used);
     }
-    if (Object.keys(aggregate).length > 0) {
-      addBoundedMap(aggregateUsageByTrace, traceId, aggregate, MAX_TRACE_SESSION_KEYS);
-    }
-    // Mid-flight stamp if the span already exists.
-    const span = invokeAgentByTrace.get(traceId);
+    const merged =
+      Object.keys(patch).length > 0
+        ? pending.mergeUsage(traceId, patch)
+        : pending.getUsage(traceId);
+    const span = invokeAgents.lookup({ by: "traceId", value: traceId });
     if (span) {
-      const totalCost = cumulativeCostByTrace.get(traceId);
-      if (typeof totalCost === "number" && Number.isFinite(totalCost)) {
-        span.setAttribute("weave.cost.usd", totalCost);
+      if (typeof total === "number" && Number.isFinite(total)) {
+        span.setAttribute("weave.cost.usd", total);
       }
-      for (const [k, v] of Object.entries(aggregate)) {
-        span.setAttribute(k, v);
+      if (merged) {
+        for (const [k, v] of Object.entries(merged)) span.setAttribute(k, v);
       }
     }
   }
 
   /**
    * Capture context.assembled snapshot. Stamps on the active invoke_agent
-   * span if one exists; otherwise buffers for replay when invoke_agent starts
-   * (same async/sync race protection as model.usage and tool.loop).
+   * span if one exists; otherwise buffers for replay when invoke_agent starts.
    */
   function handleContextAssembled(
     e: Record<string, unknown>,
     traceId: string,
   ): void {
+    if (!invokeAgents || !pending) return;
     const snap: Record<string, number> = {};
     collectInt(snap, "weave.context.message_count", e.messageCount);
     collectInt(snap, "weave.context.history_text_chars", e.historyTextChars);
@@ -972,94 +838,29 @@ export function createWeaveService(
     collectInt(snap, "weave.context.budget_tokens", e.contextTokenBudget);
     collectInt(snap, "weave.context.reserve_tokens", e.reserveTokens);
     if (Object.keys(snap).length === 0) return;
-    addBoundedMap(pendingContextByTrace, traceId, snap, MAX_TRACE_SESSION_KEYS);
-    const span = invokeAgentByTrace.get(traceId);
+    pending.setContext(traceId, snap);
+    const span = invokeAgents.lookup({ by: "traceId", value: traceId });
     if (span) {
       for (const [k, v] of Object.entries(snap)) span.setAttribute(k, v);
     }
   }
 
   /**
-   * run.attempt indicates that the harness is making attempt N of a run
-   * (auto-retry path). Stamps `run_attempt` span event on the invoke_agent
-   * with the attempt number. Looked up by runId since the diagnostic event's
-   * trace context may pre-date the harness.run.started for that attempt.
+   * run.attempt indicates the harness is making attempt N of a run (auto-retry
+   * path). Stamps a `run_attempt` span event on the invoke_agent with the
+   * attempt number. Looked up by runId since the diagnostic event's trace
+   * context may pre-date the harness.run.started for that attempt.
    */
-  /**
-   * Render the active span set grouped by traceId, with indentation reflecting
-   * parent linkage. Used by `OPENCLAW_WEAVE_DEBUG=trace-tree` to diagnose
-   * structural issues like "this trace has 5 invoke_agents" or "tool span is
-   * a sibling of invoke_agent instead of a descendant of chat".
-   */
-  function dumpTraceTree(reason: string): void {
-    if (!debugLogger) return;
-    if (activeSpans.size === 0) {
-      debugLogger.debug(
-        `[weave debug] trace-tree (after ${reason}): <empty>`,
-      );
-      return;
-    }
-    type Node = {
-      openclawSpanId: string;
-      name: string;
-      parentOpenclawSpanId?: string;
-      otelSpanId: string;
-      otelParentSpanId?: string;
-    };
-    const byTrace = new Map<string, Node[]>();
-    for (const [openclawSpanId, span] of activeSpans) {
-      const meta = spanMetaByOpenclawSpanId.get(openclawSpanId) ?? {
-        name: "?",
-      };
-      const ctxIds = span.spanContext();
-      const node: Node = {
-        openclawSpanId,
-        name: meta.name,
-        parentOpenclawSpanId: meta.parentOpenclawSpanId,
-        otelSpanId: ctxIds.spanId,
-      };
-      const list = byTrace.get(ctxIds.traceId) ?? [];
-      list.push(node);
-      byTrace.set(ctxIds.traceId, list);
-    }
-    const lines: string[] = [
-      `[weave debug] trace-tree (after ${reason}, ${activeSpans.size} active span${activeSpans.size === 1 ? "" : "s"}):`,
-    ];
-    for (const [traceId, nodes] of byTrace) {
-      lines.push(`  trace=${traceId}`);
-      const ids = new Set(nodes.map((n) => n.openclawSpanId));
-      const childrenOf = new Map<string, Node[]>();
-      const roots: Node[] = [];
-      for (const n of nodes) {
-        if (n.parentOpenclawSpanId && ids.has(n.parentOpenclawSpanId)) {
-          const list = childrenOf.get(n.parentOpenclawSpanId) ?? [];
-          list.push(n);
-          childrenOf.set(n.parentOpenclawSpanId, list);
-        } else {
-          roots.push(n);
-        }
-      }
-      const render = (n: Node, indent: number): void => {
-        lines.push(
-          `${" ".repeat(indent)}${n.name} [openclawSpanId=${n.openclawSpanId}${n.parentOpenclawSpanId ? `, claimedParent=${n.parentOpenclawSpanId}` : ""}]`,
-        );
-        for (const c of childrenOf.get(n.openclawSpanId) ?? []) {
-          render(c, indent + 2);
-        }
-      };
-      for (const r of roots) render(r, 4);
-    }
-    debugLogger.debug(lines.join("\n"));
-  }
-
   function handleRunAttempt(e: Record<string, unknown>): void {
-    const runId = typeof e.runId === "string" ? e.runId : undefined;
+    if (!invokeAgents) return;
+    const runId = nonEmptyString(e.runId);
     if (!runId) return;
-    const span = invokeAgentByRunId.get(runId);
+    const span = invokeAgents.lookup({ by: "runId", value: runId });
     if (!span) return;
-    const attempt = typeof e.attempt === "number" && Number.isFinite(e.attempt)
-      ? Math.trunc(e.attempt)
-      : undefined;
+    const attempt =
+      typeof e.attempt === "number" && Number.isFinite(e.attempt)
+        ? Math.trunc(e.attempt)
+        : undefined;
     const attrs: Record<string, string | number | boolean> = {};
     if (attempt !== undefined) attrs["weave.run.attempt"] = attempt;
     span.addEvent("run_attempt", attrs);
@@ -1073,6 +874,7 @@ export function createWeaveService(
    * Buffered if no invoke_agent span exists yet (sync vs async dispatch race).
    */
   function handleToolLoop(e: Record<string, unknown>, traceId: string): void {
+    if (!invokeAgents || !pending) return;
     const attrs: Record<string, string | number | boolean> = {};
     if (typeof e.toolName === "string") attrs["weave.tool.name"] = e.toolName;
     if (typeof e.level === "string") attrs["weave.loop.level"] = e.level;
@@ -1085,15 +887,12 @@ export function createWeaveService(
     if (typeof e.pairedToolName === "string") {
       attrs["weave.loop.paired_tool_name"] = e.pairedToolName;
     }
-    const span = invokeAgentByTrace.get(traceId);
+    const span = invokeAgents.lookup({ by: "traceId", value: traceId });
     if (span) {
       span.addEvent("tool.loop", attrs);
       return;
     }
-    // Buffer until invoke_agent starts.
-    const pending = pendingToolLoopsByTrace.get(traceId) ?? [];
-    pending.push({ name: "tool.loop", attrs });
-    addBoundedMap(pendingToolLoopsByTrace, traceId, pending, MAX_TRACE_SESSION_KEYS);
+    pending.bufferToolLoop(traceId, { name: "tool.loop", attrs });
   }
 
   async function teardownInternal(): Promise<void> {
@@ -1103,24 +902,9 @@ export function createWeaveService(
       // ignore
     }
     unsubscribe = undefined;
-    for (const span of activeSpans.values()) {
-      try {
-        span.end();
-      } catch {
-        // ignore
-      }
-    }
-    activeSpans.clear();
-    spanMetaByOpenclawSpanId.clear();
-    sessionKeysByTrace.clear();
-    invokeAgentByTrace.clear();
-    invokeAgentByRunId.clear();
-    cumulativeCostByTrace.clear();
-    aggregateUsageByTrace.clear();
-    pendingToolLoopsByTrace.clear();
-    pendingContextByTrace.clear();
-    invokeAgentBySessionKey.clear();
-    pendingSessionStartByKey.clear();
+    spans?.endAllRemaining();
+    invokeAgents?.clear();
+    pending?.clear();
     for (const span of subagentSpansByRunId.values()) {
       try {
         span.end();
@@ -1137,6 +921,9 @@ export function createWeaveService(
     provider = undefined;
     tracer = undefined;
     resolvedCfg = undefined;
+    spans = undefined;
+    invokeAgents = undefined;
+    pending = undefined;
     debugLogger = undefined;
   }
 }
@@ -1149,6 +936,10 @@ function collectInt(
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     out[key] = Math.trunc(value);
   }
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 /**
@@ -1166,75 +957,6 @@ function nonOwningExporter(inner: SpanExporter): SpanExporter {
       ? { forceFlush: inner.forceFlush.bind(inner) }
       : {}),
   };
-}
-
-/**
- * Set a key on a Map with FIFO size bound. If the Map is at capacity AND the
- * key is new, the oldest entry (first-inserted) is evicted before insert.
- * Maps in JS preserve insertion order, so this is O(1).
- */
-function addBoundedMap<K, V>(map: Map<K, V>, key: K, value: V, cap: number): void {
-  if (map.size >= cap && !map.has(key)) {
-    const oldestKey = map.keys().next().value;
-    if (oldestKey !== undefined) {
-      map.delete(oldestKey);
-    }
-  }
-  map.set(key, value);
-}
-
-/**
- * Result of {@link resolveParentContextOrDrop}: either continue with an OTel
- * context to attach the new span to, or drop the span as an orphan.
- */
-export type ResolveParentResult =
-  | { drop: false; ctx: Context }
-  | { drop: true };
-
-/**
- * Single source of truth for the orphan-drop policy. Previously inlined in
- * three places (emitCompactionSpan, startSubagentSpan, and the mapper-path
- * branch in handleEvent), each with a slightly different debug message and a
- * subtly different "what counts as a legitimate root" rule. Centralising
- * prevents drift when new emit paths are added.
- *
- * Policy:
- *   - claimsParent=false                              -> root under active ctx
- *   - claimsParent=true,  parentSpan resolved         -> child of parentSpan
- *   - claimsParent=true,  parentSpan undefined,
- *       allowOrphanAsRoot=true                        -> root under active ctx
- *       allowOrphanAsRoot=false                       -> drop (logs via debugLogger)
- *
- * `allowOrphanAsRoot` lets the top-level invoke_agent become a root even when
- * its trace.parentSpanId points at an upstream OpenClaw harness span we don't
- * track. Child spans (chat / execute_tool / context_compacted / subagent)
- * always drop when their claimed parent isn't active — promoting them to root
- * would render in Weave's Agents tab as a separate top-level "turn", making
- * one agent run look like many.
- *
- * Callers do the parent lookup themselves because the three sites read from
- * different maps (activeSpans for the mapper/compaction paths,
- * invokeAgentByRunId for subagents).
- *
- * @internal exported for tests.
- */
-export function resolveParentContextOrDrop(args: {
-  parentSpan: Span | undefined;
-  claimsParent: boolean;
-  allowOrphanAsRoot: boolean;
-  spanName: string;
-  /** Pre-built `key=value key=value` string included in the drop debug log. */
-  dropDebugFields: string;
-  debugLogger: { debug: (msg: string) => void } | undefined;
-}): ResolveParentResult {
-  const active = otelContext.active();
-  if (!args.claimsParent) return { drop: false, ctx: active };
-  if (args.parentSpan) return { drop: false, ctx: trace.setSpan(active, args.parentSpan) };
-  if (args.allowOrphanAsRoot) return { drop: false, ctx: active };
-  args.debugLogger?.debug(
-    `[weave debug] drop-orphan span=${args.spanName} ${args.dropDebugFields} reason=parent-not-resolved`,
-  );
-  return { drop: true };
 }
 
 function clampFlushInterval(raw: unknown): number {

@@ -5,7 +5,6 @@
 import {
   context as otelContext,
   trace as otelTrace,
-  type Context,
   type Span,
   type SpanKind,
   type Tracer,
@@ -14,31 +13,55 @@ import { setBoundedMap } from "./bounded-map.js";
 
 export type DebugLogger = { debug: (msg: string) => void };
 
-export type ResolveParentResult =
-  | { kind: "ok"; ctx: Context; resolved: boolean }
-  | { kind: "orphan-drop"; reason: string };
-
 export type OpenSpanParams = {
   spanName: string;
   spanKind: SpanKind;
   /**
-   * When supplied, the new span is indexed in `activeSpans` so future events
-   * can resolve it as a parent and `closeSpan` can finalize it. Omit for
-   * one-shot spans (compaction, subagent) that don't need lookup.
+   * When set, the new span is indexed in `activeSpans` so future events can
+   * resolve it as a parent and `closeSpan` can finalize it. Omit for one-shot
+   * spans (compaction, subagent) that need parent resolution + creation but
+   * not lookup.
    */
   openclawSpanId?: string;
+  /**
+   * OpenClaw spanId of the claimed parent. Recorded in `spanMeta` for the
+   * trace-tree debug dump and used in span-create / orphan-drop log lines.
+   * Independent of `parentSpan` — for the subagent/InvokeAgentIndex case
+   * where the parent is looked up by runId rather than spanId, leave this
+   * undefined.
+   */
   openclawParentSpanId?: string;
+  /**
+   * Pre-resolved parent `Span`, or undefined if the caller looked but found
+   * none. Used in concert with `claimsParent` to drive the orphan-drop
+   * decision.
+   */
+  parentSpan?: Span;
+  /**
+   * `true` when the caller intended to attach this span under a parent
+   * (regardless of whether `parentSpan` was resolved). When `parentSpan` is
+   * undefined and `claimsParent=true` and `allowRootless=false`, the span is
+   * orphan-dropped.
+   *
+   * `false` (default) means the span is intentionally rootless — e.g.
+   * subagent spawned without a requesterRunId.
+   */
+  claimsParent?: boolean;
+  /**
+   * Override the orphan-drop policy and let the span be created as a trace
+   * root even when its claimed parent isn't active. Used for `invoke_agent`
+   * (whose claimed parent may live in OpenClaw's upstream harness layer we
+   * don't observe).
+   */
+  allowRootless?: boolean;
   attrs: Record<string, string | number | boolean>;
   startTimeMs: number;
   /**
-   * When true, the span may still be created even if `openclawParentSpanId`
-   * is set but unresolved — the span becomes a trace root. Used for
-   * legitimately-rootable spans (invoke_agent) and intentionally-unrooted
-   * subagent spans (no requesterRunId).
-   *
-   * When false (default), an unresolved parent triggers orphan-drop.
+   * Free-form `key=value key=value` string appended to the orphan-drop debug
+   * log so callers can carry their own context (e.g. `requesterRunId=...
+   * subagentRunId=...`) without forcing it into the type system.
    */
-  allowRootless?: boolean;
+  debugContext?: string;
 };
 
 export type OpenSpanResult =
@@ -49,24 +72,27 @@ export type OpenSpanResult =
 export type CloseSpanParams = {
   openclawSpanId: string;
   endTimeMs: number;
-  status: { code: 0 | 1 | 2; message?: string };
+  /** OTel SpanStatusCode (`UNSET=0`, `OK=1`, `ERROR=2`). */
+  statusCode: 0 | 1 | 2;
+  statusMessage?: string;
+  /** Additional attrs to set immediately before ending the span. */
   attrs?: Record<string, string | number | boolean>;
+  /** Exception event to record (per OTel `recording-errors.md`). */
   exception?: { name: string; message: string };
 };
 
 /**
- * Owns the lifecycle of OTel spans keyed by OpenClaw `spanId`. Provides:
+ * Owns the lifecycle of OTel spans keyed by OpenClaw `spanId`. The single
+ * source of truth for:
  *
- *   - Parent resolution (`resolveParent`) — the single source of truth for the
- *     "drop a child span when its parent isn't active" policy. All emit sites
- *     (mapper-driven, compaction, subagent) call into this so the policy
- *     can't drift across them.
- *   - Span creation with bounded indexing (`openSpan`) — caller-side spanId
- *     lookup is needed so future events can claim this span as their parent
- *     and `closeSpan` can finalize it. One-shot spans (compaction, subagent)
- *     omit `openclawSpanId` and skip indexing.
- *   - Tree dump (`dumpTree`) — debug-mode visualisation of currently-active
- *     spans grouped by traceId, with parent linkage shown via indentation.
+ *   - Parent resolution + orphan-drop policy (`openSpan`) — all emit sites
+ *     route through one method so the "what counts as a legitimate root"
+ *     rule cannot drift across them.
+ *   - Span indexing for parent linkage (`get`, `closeSpan`) — future events
+ *     can claim a span by its OpenClaw spanId and finalize it.
+ *   - Per-span metadata for the trace-tree debug dump (`dumpTree`) — the
+ *     OTel Span API doesn't expose `parentSpanId` or `name`, so we track
+ *     them alongside the indexed Span.
  *
  * FIFO-bounded to `cap` entries to defend against unbounded growth when an
  * event stream is interrupted (gateway crash, dropped conversation).
@@ -84,10 +110,7 @@ export class SpanRegistry {
     private readonly debugLogger?: DebugLogger,
   ) {}
 
-  /**
-   * Look up an active span by its OpenClaw `spanId`. Returns undefined when
-   * the span has already been closed or was never tracked.
-   */
+  /** Look up an indexed span by its OpenClaw `spanId`. */
   get(openclawSpanId: string): Span | undefined {
     return this.activeSpans.get(openclawSpanId);
   }
@@ -97,48 +120,32 @@ export class SpanRegistry {
   }
 
   /**
-   * Resolve a parent OTel `Context` from an OpenClaw parent spanId. Returns
-   * `{ kind: "ok" }` with the resolved context (or the current active context
-   * when no parent was claimed), or `{ kind: "orphan-drop" }` when a parent
-   * was claimed but isn't in `activeSpans` and `allowRootless` is false.
-   */
-  resolveParent(
-    parentOpenclawSpanId: string | undefined,
-    allowRootless: boolean,
-  ): ResolveParentResult {
-    let ctx = otelContext.active();
-    let resolved = false;
-    if (parentOpenclawSpanId) {
-      const parentSpan = this.activeSpans.get(parentOpenclawSpanId);
-      if (parentSpan) {
-        ctx = otelTrace.setSpan(ctx, parentSpan);
-        resolved = true;
-      }
-    }
-    if (parentOpenclawSpanId && !resolved && !allowRootless) {
-      return { kind: "orphan-drop", reason: "parent-not-in-activeSpans" };
-    }
-    return { kind: "ok", ctx, resolved };
-  }
-
-  /**
-   * Resolve parent context, create the span, and (if `openclawSpanId` is
-   * supplied) index it for future lookup. Idempotent on duplicate
-   * `openclawSpanId` — returns `{ kind: "duplicate", existing }` rather than
-   * creating a second span.
+   * Resolve parent, drop or create span, and (if `openclawSpanId` is set)
+   * index the span for future lookup. Logs an orphan-drop line through
+   * `debugLogger` when applicable. Idempotent on duplicate `openclawSpanId`.
    */
   openSpan(p: OpenSpanParams): OpenSpanResult {
     if (p.openclawSpanId !== undefined) {
       const existing = this.activeSpans.get(p.openclawSpanId);
       if (existing) return { kind: "duplicate", existing };
     }
-    const parent = this.resolveParent(
-      p.openclawParentSpanId,
-      p.allowRootless ?? false,
-    );
-    if (parent.kind === "orphan-drop") {
-      return { kind: "orphan-drop", reason: parent.reason };
+
+    const claimsParent = p.claimsParent ?? false;
+    const parentResolved = !!p.parentSpan;
+    if (claimsParent && !parentResolved && !(p.allowRootless ?? false)) {
+      this.debugLogger?.debug(
+        `[weave debug] drop-orphan span=${p.spanName}${
+          p.debugContext ? ` ${p.debugContext}` : ""
+        } reason=parent-not-resolved`,
+      );
+      return { kind: "orphan-drop", reason: "parent-not-resolved" };
     }
+
+    const active = otelContext.active();
+    const parentCtx = p.parentSpan
+      ? otelTrace.setSpan(active, p.parentSpan)
+      : active;
+
     const span = this.tracer.startSpan(
       p.spanName,
       {
@@ -146,24 +153,29 @@ export class SpanRegistry {
         attributes: p.attrs,
         startTime: new Date(p.startTimeMs),
       },
-      parent.ctx,
+      parentCtx,
     );
+
     if (p.openclawSpanId !== undefined) {
       setBoundedMap(this.activeSpans, p.openclawSpanId, span, this.cap);
       this.spanMeta.set(p.openclawSpanId, {
         name: p.spanName,
         parentOpenclawSpanId: p.openclawParentSpanId,
       });
+      this.debugLogger?.debug(
+        `[weave debug] span-create name=${p.spanName} traceId=${span.spanContext().traceId} spanId=${p.openclawSpanId} parentSpanId=${p.openclawParentSpanId ?? "<none>"} parentResolved=${parentResolved}`,
+      );
     }
-    return { kind: "ok", span, parentResolved: parent.resolved };
+
+    return { kind: "ok", span, parentResolved };
   }
 
   /**
    * Finalize an indexed span: set extra attrs, optionally record an exception
    * event, set status, end at the given time, and drop the indexing entry.
-   * Returns the closed span (or undefined when the spanId was never tracked /
-   * was already closed) so callers can perform last-minute cleanup keyed by
-   * Span identity.
+   * Returns the closed `Span` (or undefined when the spanId was never tracked
+   * / was already closed) so callers can do last-mile cleanup keyed on Span
+   * identity (e.g. `InvokeAgentIndex.unregister(span)`).
    */
   closeSpan(p: CloseSpanParams): Span | undefined {
     const span = this.activeSpans.get(p.openclawSpanId);
@@ -175,9 +187,9 @@ export class SpanRegistry {
       span.recordException(p.exception);
     }
     span.setStatus(
-      p.status.message
-        ? { code: p.status.code, message: p.status.message }
-        : { code: p.status.code },
+      p.statusMessage
+        ? { code: p.statusCode, message: p.statusMessage }
+        : { code: p.statusCode },
     );
     span.end(new Date(p.endTimeMs));
     this.activeSpans.delete(p.openclawSpanId);
@@ -186,9 +198,9 @@ export class SpanRegistry {
   }
 
   /**
-   * End every currently-tracked span (used during service teardown so spans
+   * End every currently-indexed span (used during service teardown so spans
    * for in-flight runs are flushed rather than leaked). Errors during end()
-   * are swallowed — at this point we've already lost the conversation.
+   * are swallowed — at this point the conversation is already lost.
    */
   endAllRemaining(): void {
     for (const span of this.activeSpans.values()) {
@@ -222,15 +234,14 @@ export class SpanRegistry {
     const byTrace = new Map<string, Node[]>();
     for (const [openclawSpanId, span] of this.activeSpans) {
       const meta = this.spanMeta.get(openclawSpanId) ?? { name: "?" };
-      const ctxIds = span.spanContext();
-      const node: Node = {
+      const traceId = span.spanContext().traceId;
+      const list = byTrace.get(traceId) ?? [];
+      list.push({
         openclawSpanId,
         name: meta.name,
         parentOpenclawSpanId: meta.parentOpenclawSpanId,
-      };
-      const list = byTrace.get(ctxIds.traceId) ?? [];
-      list.push(node);
-      byTrace.set(ctxIds.traceId, list);
+      });
+      byTrace.set(traceId, list);
     }
     const lines: string[] = [
       `[weave debug] trace-tree (after ${reason}, ${this.activeSpans.size} active span${this.activeSpans.size === 1 ? "" : "s"}):`,
