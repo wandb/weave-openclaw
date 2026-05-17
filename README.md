@@ -38,7 +38,11 @@ this plugin sends a Weave-flavored stream to W&B.
 pnpm add weave-openclaw
 ```
 
-Minimal gateway config (with `WANDB_API_KEY` in the env):
+Then add the block below to your OpenClaw gateway config. By default
+that's `~/.openclaw/openclaw.json` (JSON5, so comments and trailing
+commas are allowed); set `OPENCLAW_CONFIG_PATH` to override. If you
+don't have a config yet, run `openclaw onboard` to scaffold one. The
+plugin reads `WANDB_API_KEY` from the environment:
 
 ```json5
 {
