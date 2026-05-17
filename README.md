@@ -91,14 +91,21 @@ Full configuration with every option:
             systemInstructions: false,
           },
           // Optional. Strip OpenClaw's metadata-wrapper prefix
-          // (`Conversation info` / `Sender (untrusted metadata)` / `[timestamp]`)
-          // from user messages — applies to both `historyMessages` and the
-          // in-flight prompt. Default false (raw, OTel-conforming): keep
-          // the wrapper so the trace reflects what the LLM actually saw.
-          // Set true to opt into a cleaner Weave Agents-tab chat view at
-          // the cost of fidelity. Full design rationale (why default raw,
-          // what competitors do, when to flip) in
-          // `2026-05-03-wrapper-strip-design.md`.
+          // (`Conversation info` / `Sender (untrusted metadata)` /
+          // `[timestamp]`) from user messages. Applies to both
+          // `historyMessages` and the in-flight prompt.
+          //
+          // Default false. Raw matches OTel `gen_ai.input.messages`
+          // semantics (store what the LLM actually saw), which is
+          // also what Phoenix, Helicone, LangSmith, Langfuse, and
+          // OpenLLMetry do. Keeping the wrapper also preserves
+          // prompt-injection visibility (an attacker who sneaks
+          // text into wrapper fields appears verbatim in the
+          // trace) and surfaces wrapper-format bugs in OpenClaw
+          // itself.
+          //
+          // Set true to strip for a cleaner Weave Agents-tab chat
+          // view, at the cost of fidelity and OTel conformance.
           stripSenderWrapper: false,
           // Default true. Dual-emit `gen_ai.*` aliases alongside `weave.*`
           // so spans are portable to non-Weave OTel backends (Datadog,
