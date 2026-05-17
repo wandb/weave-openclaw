@@ -141,7 +141,7 @@ describe("createWeaveService (integration)", () => {
     resetDiagnosticEventsForTest();
   });
 
-  test("emits the invoke_agent → chat → execute_tool tree for a full turn", async () => {
+  test("emits invoke_agent with chat and execute_tool as siblings for a full turn", async () => {
     const { service } = createWeaveService({
       pluginConfig: {
         entity: "acme",
@@ -179,8 +179,12 @@ describe("createWeaveService (integration)", () => {
       runId: "r-1",
       toolName: "search_web",
       toolCallId: "call_xyz",
-      // intentionally NO sessionKey — should resolve via traceId cache
-      trace: trace(TOOL_SPAN_ID, CHAT_SPAN_ID),
+      // intentionally NO sessionKey — should resolve via traceId cache.
+      // Parent is ROOT_SPAN_ID (invoke_agent), not CHAT_SPAN_ID: OpenClaw
+      // emits tool.execution events from createChildDiagnosticTraceContext(runTrace),
+      // so they are siblings of chat under invoke_agent — matches OTel GenAI
+      // semconv `docs/gen-ai/gen-ai-agent-spans.md`.
+      trace: trace(TOOL_SPAN_ID, ROOT_SPAN_ID),
     } as never);
     emitTrustedDiagnosticEvent({
       type: "tool.execution.completed",
@@ -188,7 +192,7 @@ describe("createWeaveService (integration)", () => {
       toolName: "search_web",
       toolCallId: "call_xyz",
       durationMs: 200,
-      trace: trace(TOOL_SPAN_ID, CHAT_SPAN_ID),
+      trace: trace(TOOL_SPAN_ID, ROOT_SPAN_ID),
     } as never);
     emitTrustedDiagnosticEvent({
       type: "model.call.completed",
@@ -254,8 +258,9 @@ describe("createWeaveService (integration)", () => {
     expect(tool.attributes["weave.tool.call.id"]).toBe("call_xyz");
 
     // Parent linkage at the OTel trace tree level.
+    // chat and execute_tool are sibling children of invoke_agent.
     expect(chat.parentSpanContext?.spanId).toBe(invoke.spanContext().spanId);
-    expect(tool.parentSpanContext?.spanId).toBe(chat.spanContext().spanId);
+    expect(tool.parentSpanContext?.spanId).toBe(invoke.spanContext().spanId);
   });
 
   test("drops untrusted events (security boundary)", async () => {

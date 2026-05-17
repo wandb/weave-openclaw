@@ -154,7 +154,7 @@ export type MapperContext = {
  * Coverage:
  * - run.{started,completed}                       -> invoke_agent <agent>  (root)
  * - model.call.{started,completed,error}          -> chat <model>          (child of invoke)
- * - tool.execution.{started,completed,error,blocked} -> execute_tool <tool> (child of chat)
+ * - tool.execution.{started,completed,error,blocked} -> execute_tool <tool> (child of invoke)
  *
  * `harness.run.*` events are intentionally NOT mapped. The OpenClaw runtime
  * (`src/agents/harness/v2.ts`) emits `harness.run.started` without an explicit

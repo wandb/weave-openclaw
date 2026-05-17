@@ -16,9 +16,13 @@ loop into Weave's expected span tree:
 
 ```
 invoke_agent <agent.name>     ← run.{started,completed}
-  └─ chat <model>              ← model.call.{started,completed,error}
-       └─ execute_tool <tool>  ← tool.execution.{started,completed,error,blocked}
+  ├─ chat <model>              ← model.call.{started,completed,error}
+  └─ execute_tool <tool>       ← tool.execution.{started,completed,error,blocked}
 ```
+
+`chat` and `execute_tool` are sibling children of `invoke_agent`, not nested.
+A multi-turn loop produces an alternating sequence of `chat` and
+`execute_tool` siblings under the same `invoke_agent` root.
 
 Conversation grouping is via `weave.conversation.id` (mapped from OpenClaw's
 `sessionKey`).
@@ -34,7 +38,24 @@ this plugin sends a Weave-flavored stream to W&B.
 pnpm add weave-openclaw
 ```
 
-Then enable in your gateway config:
+Minimal gateway config (with `WANDB_API_KEY` in the env):
+
+```json5
+{
+  plugins: {
+    allow: ["weave"],
+    entries: {
+      weave: {
+        enabled: true,
+        config: { entity: "your-team", project: "your-project" },
+      },
+    },
+  },
+  diagnostics: { enabled: true },
+}
+```
+
+Full configuration with every option:
 
 ```json5
 {
@@ -130,8 +151,9 @@ The key is resolved from (in order):
 The plugin emits OpenTelemetry GenAI semantic-convention attributes per the
 post-v1.36.0 registry mainline:
 
-- **Span hierarchy** `invoke_agent → chat → execute_tool` matches
-  `docs/gen-ai/gen-ai-agent-spans.md`.
+- **Span hierarchy** matches `docs/gen-ai/gen-ai-agent-spans.md`: `chat`
+  and `execute_tool` are sibling children of `invoke_agent`. Each chat
+  call and each tool execution is its own span under the agent root.
 - **Span kinds** INTERNAL / CLIENT / INTERNAL per the spec.
 - **Message payloads** follow `docs/gen-ai/gen-ai-input-messages.json` and
   `gen-ai-output-messages.json`: `{role, parts, finish_reason}` with
