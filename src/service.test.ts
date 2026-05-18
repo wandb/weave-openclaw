@@ -482,8 +482,65 @@ describe("createWeaveService (integration)", () => {
     expect(invoke).toBeDefined();
     // 0.0023 + 0.0011 = 0.0034
     expect(invoke?.attributes["weave.cost.usd"]).toBeCloseTo(0.0034, 6);
-    // Latest aggregate token totals are reflected too.
+    // Latest aggregate token totals on the closed span — the second event's
+    // usage block REPLACES the first (mergeUsage spreads), so values reflect
+    // the most recent model.usage event, not a sum.
+    expect(invoke?.attributes["weave.usage.total.input_tokens"]).toBe(30);
+    expect(invoke?.attributes["weave.usage.total.output_tokens"]).toBe(20);
     expect(invoke?.attributes["weave.usage.total.tokens"]).toBe(50);
+  });
+
+  test("model.usage emitted before run.started is buffered and hydrated onto the invoke_agent span", async () => {
+    // Race resilience: model.usage dispatches synchronously and can fire on
+    // the same tick before downstream listeners observe run.started, so the
+    // invoke_agent doesn't exist yet when our handler runs. Buffered values
+    // must land on the span when it arrives (PendingTraceState.hydrate*)
+    // and remain on the closed span (PendingTraceState.finalize*).
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "model.usage",
+      sessionKey: "conv-out-of-order",
+      provider: "anthropic",
+      model: "claude-sonnet-4.6",
+      usage: { input: 200, output: 80, total: 280 },
+      costUsd: 0.0042,
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-buffered",
+      harnessId: "x",
+      sessionKey: "conv-out-of-order",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-buffered",
+      harnessId: "x",
+      durationMs: 100,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = exporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    expect(invoke).toBeDefined();
+    expect(invoke?.attributes["weave.cost.usd"]).toBeCloseTo(0.0042, 6);
+    expect(invoke?.attributes["weave.usage.total.input_tokens"]).toBe(200);
+    expect(invoke?.attributes["weave.usage.total.output_tokens"]).toBe(80);
+    expect(invoke?.attributes["weave.usage.total.tokens"]).toBe(280);
   });
 
   test("tool.loop event becomes a span event on the active invoke_agent", async () => {

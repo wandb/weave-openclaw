@@ -259,9 +259,7 @@ export function createWeaveService(
    *
    * Tracked separately from `SpanRegistry` (rather than indexed by OpenClaw
    * spanId) because the `subagent_spawned` / `subagent_ended` hooks don't
-   * carry a spanId — only the subagent's runId. Two operations on this map
-   * (set on start, delete on end), so a fourth class is overkill; the
-   * explicit identifier in the name carries the distinction.
+   * carry a spanId — only the subagent's runId.
    */
   const subagentSpansBySubagentRunId = new Map<string, Span>();
 
