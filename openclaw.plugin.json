@@ -9,6 +9,7 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": ["entity", "project"],
     "properties": {
       "enabled": {
         "type": "boolean",
