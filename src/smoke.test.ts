@@ -37,7 +37,8 @@ async function flushAsyncDiagnostics(): Promise<void> {
 type Capture = { headers: IncomingMessage["headers"]; body: Buffer };
 
 function startCaptureServer(): Promise<{
-  url: string;
+  /** Trace-server base URL (no `/agents/otel/v1/traces`). The plugin appends. */
+  baseUrl: string;
   getCapture: () => Capture | null;
   close: () => Promise<void>;
 }> {
@@ -55,9 +56,9 @@ function startCaptureServer(): Promise<{
     });
     server.listen(0, "127.0.0.1", () => {
       const addr = server.address() as AddressInfo;
-      const url = `http://127.0.0.1:${addr.port}/agents/otel/v1/traces`;
+      const baseUrl = `http://127.0.0.1:${addr.port}`;
       resolve({
-        url,
+        baseUrl,
         getCapture: () => capture,
         close() {
           return new Promise<void>((r) => server.close(() => r()));
@@ -87,7 +88,7 @@ describe("smoke: HTTP loopback wire format", () => {
         entity: "smoke",
         project: "test",
         agentName: "smoke-agent",
-        endpoint: server.url,
+        wfTraceServerUrl: server.baseUrl,
         flushIntervalMs: 1000,
       },
     });

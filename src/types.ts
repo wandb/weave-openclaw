@@ -18,9 +18,24 @@ export type RawWeavePluginConfig = {
   entity?: string;
   project?: string;
   apiKey?: string | SecretRef;
-  tier?: "cloud" | "dedicated";
-  subdomain?: string;
-  endpoint?: string;
+  /**
+   * W&B install base URL (matches the Weave Python SDK's `WANDB_BASE_URL`
+   * env var). Defaults to `https://api.wandb.ai` (cloud / MTSaaS). For a
+   * dedicated install set this to your install hostname,
+   * e.g. `https://acme.wandb.io`. The plugin derives the trace-server URL
+   * per the Weave SDK rule (cloud → `https://trace.wandb.ai`; dedicated →
+   * `<base>/traces`) and appends `/agents/otel/v1/traces`. Falls back to
+   * the `WANDB_BASE_URL` env var when omitted.
+   */
+  wandbBaseUrl?: string;
+  /**
+   * Full trace-server URL override (matches the Weave Python SDK's
+   * `WF_TRACE_SERVER_URL` env var). Bypasses `wandbBaseUrl` derivation
+   * entirely; plugin appends `/agents/otel/v1/traces` and posts there.
+   * Use this for self-managed installs or routing through a proxy. Falls
+   * back to the `WF_TRACE_SERVER_URL` env var when omitted.
+   */
+  wfTraceServerUrl?: string;
   serviceName?: string;
   agentName?: string;
   /**

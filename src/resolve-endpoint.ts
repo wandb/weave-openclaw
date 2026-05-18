@@ -5,45 +5,73 @@
 import type { RawWeavePluginConfig } from "./types.js";
 
 const AGENTS_TRACES_PATH = "/agents/otel/v1/traces";
+const DEFAULT_WANDB_BASE_URL = "https://api.wandb.ai";
+const CLOUD_TRACE_SERVER_URL = "https://trace.wandb.ai";
 
 /**
- * Build the full agents-OTel traces URL. Weave does not auto-append the
- * per-signal path; the client must send the full URL.
+ * Resolve the full traces endpoint URL the OTLP exporter posts to.
  *
- * - cloud:      https://trace.wandb.ai/agents/otel/v1/traces
- * - dedicated:  https://<subdomain>.wandb.io/traces/agents/otel/v1/traces
+ * Mirrors the W&B Weave Python SDK's URL derivation
+ * (`weave/trace/env.py:weave_trace_server_url`) so operators coming from
+ * `weave.init(...)` don't have to re-learn the config shape:
  *
- * Note the dedicated URL pattern includes an extra "/traces" segment before
- * "/agents/otel/v1/traces" — this is verified from the public Weave docs.
+ *   1. `wfTraceServerUrl` (config) or `WF_TRACE_SERVER_URL` (env) — full
+ *      trace-server URL override. Bypasses base-URL derivation entirely.
+ *   2. `wandbBaseUrl` (config) or `WANDB_BASE_URL` (env) — the W&B install
+ *      URL, default `https://api.wandb.ai`. When the base is the cloud
+ *      default, traces route to the dedicated `https://trace.wandb.ai`
+ *      subdomain (MTSaaS). Any other base is treated as a self-managed /
+ *      dedicated install and gets `<base>/traces` as its trace-server URL.
  *
- * Throws if config is incomplete (e.g. dedicated tier without subdomain).
+ * The plugin appends `/agents/otel/v1/traces` to whatever trace-server URL
+ * is resolved.
+ *
+ * Throws if a supplied override fails minimal validation.
  */
 export function resolveWeaveEndpoint(cfg: RawWeavePluginConfig): string {
-  if (cfg.endpoint) {
-    const explicit = cfg.endpoint.trim().replace(/\/+$/, "");
-    if (!explicit.endsWith(AGENTS_TRACES_PATH)) {
-      throw new Error(
-        `weave.endpoint must end with ${AGENTS_TRACES_PATH}; got ${explicit}`,
-      );
-    }
-    return explicit;
+  return `${resolveTraceServerUrl(cfg)}${AGENTS_TRACES_PATH}`;
+}
+
+function resolveTraceServerUrl(cfg: RawWeavePluginConfig): string {
+  const wfOverride =
+    nonEmpty(cfg.wfTraceServerUrl) ?? nonEmpty(process.env.WF_TRACE_SERVER_URL);
+  if (wfOverride !== undefined) {
+    return normalizeAndValidateUrl(wfOverride, "wfTraceServerUrl");
   }
 
-  const tier = cfg.tier ?? "cloud";
-  if (tier === "cloud") {
-    return `https://trace.wandb.ai${AGENTS_TRACES_PATH}`;
-  }
+  const baseRaw =
+    nonEmpty(cfg.wandbBaseUrl) ??
+    nonEmpty(process.env.WANDB_BASE_URL) ??
+    DEFAULT_WANDB_BASE_URL;
+  const base = normalizeAndValidateUrl(baseRaw, "wandbBaseUrl");
 
-  const subdomain = cfg.subdomain?.trim();
-  if (!subdomain) {
+  if (base === DEFAULT_WANDB_BASE_URL) {
+    return CLOUD_TRACE_SERVER_URL;
+  }
+  return `${base}/traces`;
+}
+
+/**
+ * Strip trailing slashes; check the URL has a protocol prefix; reject the
+ * common mistake of including the agents-traces path in a trace-server URL.
+ */
+function normalizeAndValidateUrl(raw: string, fieldName: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(trimmed)) {
     throw new Error(
-      "weave.subdomain is required when tier=dedicated (e.g. 'acme' for acme.wandb.io)",
+      `weave.${fieldName} must start with http:// or https:// (got: ${raw})`,
     );
   }
-  if (!/^[a-z0-9-]+$/i.test(subdomain)) {
+  if (trimmed.endsWith(AGENTS_TRACES_PATH)) {
     throw new Error(
-      `weave.subdomain has invalid characters: ${subdomain}. Expected [a-z0-9-]+`,
+      `weave.${fieldName} is the trace-server URL (e.g. "https://trace.wandb.ai" for cloud or "https://acme.wandb.io" for dedicated), NOT the full agents endpoint. Drop the trailing "${AGENTS_TRACES_PATH}".`,
     );
   }
-  return `https://${subdomain}.wandb.io/traces${AGENTS_TRACES_PATH}`;
+  return trimmed;
+}
+
+function nonEmpty(value: string | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
 }

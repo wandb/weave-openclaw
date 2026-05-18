@@ -431,7 +431,6 @@ export function createWeaveService(
         }
       });
 
-      const tier = raw.tier ?? "cloud";
       const captureFields: string[] = [];
       if (resolvedCfg.captureContent.inputMessages) captureFields.push("inputMessages");
       if (resolvedCfg.captureContent.outputMessages) captureFields.push("outputMessages");
@@ -442,7 +441,7 @@ export function createWeaveService(
       ctx.logger.info(`weave: exporting to ${endpoint}`);
       ctx.logger.info(
         `weave: project=${projectId} service=${serviceName} agentVersion=${resolvedAgentVersion} ` +
-          `tier=${tier} auth=${authSource} flushIntervalMs=${flushInterval} ` +
+          `auth=${authSource} flushIntervalMs=${flushInterval} ` +
           `emitGenAiAliases=${resolvedCfg.emitGenAiAliases} ` +
           `stripSenderWrapper=${resolvedCfg.stripSenderWrapper} ` +
           `captureContent=${captureSummary}`,

@@ -40,19 +40,13 @@
           }
         ]
       },
-      "tier": {
+      "wandbBaseUrl": {
         "type": "string",
-        "enum": ["cloud", "dedicated"],
-        "default": "cloud",
-        "description": "cloud = trace.wandb.ai (multi-tenant). dedicated = your subdomain on wandb.io."
+        "description": "W&B install base URL — matches the Weave Python SDK's WANDB_BASE_URL env var. Default https://api.wandb.ai (cloud). For a dedicated install use your install hostname, e.g. https://acme.wandb.io. The plugin derives the trace-server URL per the Weave SDK rule (cloud -> https://trace.wandb.ai; dedicated -> <base>/traces) and appends /agents/otel/v1/traces. Falls back to WANDB_BASE_URL env var when omitted."
       },
-      "subdomain": {
+      "wfTraceServerUrl": {
         "type": "string",
-        "description": "Required when tier=dedicated. Your W&B subdomain (e.g. 'acme' for acme.wandb.io)."
-      },
-      "endpoint": {
-        "type": "string",
-        "description": "Override full traces URL. Skips tier/subdomain composition. Must end with /agents/otel/v1/traces."
+        "description": "Full trace-server URL override — matches the Weave Python SDK's WF_TRACE_SERVER_URL env var. Bypasses wandbBaseUrl derivation; plugin appends /agents/otel/v1/traces. Use for self-managed installs or proxy routing. Falls back to WF_TRACE_SERVER_URL env var when omitted."
       },
       "serviceName": {
         "type": "string",
@@ -106,8 +100,10 @@
     "enabled": { "label": "Enable Weave export" },
     "entity": { "label": "W&B Entity (team/user)" },
     "project": { "label": "W&B Project" },
-    "tier": { "label": "Deployment Tier" },
-    "subdomain": { "label": "Dedicated Subdomain" },
+    "wandbBaseUrl": {
+      "label": "W&B Base URL",
+      "help": "Default https://api.wandb.ai. For dedicated set to your install host, e.g. https://acme.wandb.io."
+    },
     "stripSenderWrapper": {
       "label": "Strip Sender wrapper",
       "help": "Cleaner chat view at the cost of fidelity to what the LLM actually saw."

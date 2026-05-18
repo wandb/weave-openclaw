@@ -75,7 +75,15 @@ Full configuration with every option:
           // SecretRef supports source: "env" or "file"
           //   { source: "env",  provider: "default", id: "WANDB_API_KEY" }
           //   { source: "file", provider: "default", id: "/run/secrets/wandb" }
-          tier: "cloud", // or "dedicated" with subdomain: "acme"
+          // Default https://api.wandb.ai (cloud). For a dedicated install,
+          // set to your install host, e.g. https://acme.wandb.io.
+          // Falls back to the WANDB_BASE_URL env var when omitted, matching
+          // the Weave Python SDK convention.
+          wandbBaseUrl: "https://api.wandb.ai",
+          // Optional. Full trace-server URL override for self-managed
+          // installs or proxy routing. Falls back to WF_TRACE_SERVER_URL env
+          // var. Plugin appends /agents/otel/v1/traces.
+          // wfTraceServerUrl: "https://proxy.example/wf",
           serviceName: "openclaw-agent",
           // Optional — improves Agents tab grouping.
           agentName: "my-agent",
@@ -127,15 +135,25 @@ the diagnostic events this plugin consumes.
 
 ## Endpoint URLs
 
-- **Cloud (multi-tenant):** `https://trace.wandb.ai/agents/otel/v1/traces`
-- **Dedicated / self-managed:** `https://<subdomain>.wandb.io/traces/agents/otel/v1/traces`
+URL derivation mirrors the Weave Python SDK exactly
+(`weave/trace/env.py:weave_trace_server_url`), so operators coming from
+`weave.init(...)` don't have to re-learn the config shape:
 
-(Note the dedicated path includes an extra `/traces` segment before
-`/agents/otel/v1/traces` — verified against the W&B trace-server URL builder
-in `weave/trace/env.py`.)
+| input | trace-server URL | full agents endpoint |
+|---|---|---|
+| `wandbBaseUrl` unset (or `https://api.wandb.ai`) | `https://trace.wandb.ai` (MTSaaS) | `https://trace.wandb.ai/agents/otel/v1/traces` |
+| `wandbBaseUrl: "https://acme.wandb.io"` | `https://acme.wandb.io/traces` | `https://acme.wandb.io/traces/agents/otel/v1/traces` |
+| `wfTraceServerUrl: "https://proxy/wf"` | `https://proxy/wf` | `https://proxy/wf/agents/otel/v1/traces` |
 
-The plugin builds these from `tier` + `subdomain`. Set `endpoint` directly to
-override.
+Resolution order for each:
+
+- `wandbBaseUrl` — config field, then `WANDB_BASE_URL` env var, then default
+  `https://api.wandb.ai`.
+- `wfTraceServerUrl` — config field, then `WF_TRACE_SERVER_URL` env var.
+  When set, bypasses `wandbBaseUrl` derivation entirely.
+
+The plugin always appends `/agents/otel/v1/traces` to whatever trace-server
+URL is resolved.
 
 ## Auth
 
@@ -386,9 +404,9 @@ appended when the error shape is recognised:
 | Hint phrase | Most likely cause | Fix |
 |---|---|---|
 | `check WANDB_API_KEY is valid and has access to the configured entity/project` | 401/403 — auth or authorization failure | Verify the key is current; confirm the team owns the entity/project. |
-| `endpoint URL not found; verify tier/subdomain or endpoint override resolves to a real traces URL` | 404 — wrong tier/subdomain | For dedicated, double-check `subdomain`. For self-managed, use the `endpoint` override and confirm it ends in `/agents/otel/v1/traces`. |
+| `endpoint URL not found; verify wandbBaseUrl (or WANDB_BASE_URL env) / wfTraceServerUrl (or WF_TRACE_SERVER_URL env) resolves to a real traces URL` | 404 — wrong base or trace-server URL | For dedicated, double-check `wandbBaseUrl` matches your install host. For self-managed / proxy, set `wfTraceServerUrl` (or `WF_TRACE_SERVER_URL`) to the trace-server URL — plugin appends `/agents/otel/v1/traces`. |
 | `Weave backend returned 5xx; retries continue` | Transient backend issue | Wait — the OTel BatchSpanProcessor retries automatically. Spans buffered while the link is down may be dropped if the gateway restarts. |
-| `network error reaching Weave; check DNS/proxy/egress` | DNS/proxy/firewall | Confirm the gateway host can reach `trace.wandb.ai` (or your dedicated subdomain) on 443. |
+| `network error reaching Weave; check DNS/proxy/egress` | DNS/proxy/firewall | Confirm the gateway host can reach the resolved trace-server host (`trace.wandb.ai` for cloud, your install host for dedicated) on 443. |
 
 When no hint is appended, the heuristic didn't recognise the error
 shape; the raw message is the only signal. File a bug if you see this

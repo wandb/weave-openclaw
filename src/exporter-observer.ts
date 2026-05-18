@@ -52,7 +52,7 @@ export function describeExportError(
   if (status === 404) {
     return {
       message,
-      hint: "endpoint URL not found; verify tier/subdomain or endpoint override resolves to a real traces URL",
+      hint: "endpoint URL not found; verify wandbBaseUrl (or WANDB_BASE_URL env) / wfTraceServerUrl (or WF_TRACE_SERVER_URL env) resolves to a real traces URL",
     };
   }
   if (status !== undefined && status >= 500 && status <= 599) {

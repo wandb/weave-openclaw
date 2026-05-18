@@ -1253,7 +1253,7 @@ describe("createWeaveService (integration)", () => {
     const info = ctx.logger.info as ReturnType<typeof vi.fn>;
     const joined = info.mock.calls.map((c) => String(c[0])).join("\n");
     expect(joined).toContain("auth=");
-    expect(joined).toContain("tier=cloud");
+    expect(joined).toContain("exporting to https://trace.wandb.ai/agents/otel/v1/traces");
     expect(joined).toContain("flushIntervalMs=5000");
     expect(joined).toContain("captureContent=off");
     expect(joined).toContain("emitGenAiAliases=true");
