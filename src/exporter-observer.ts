@@ -19,6 +19,26 @@ export type ExporterObserverOptions = {
 };
 
 /**
+ * Counters and last-event snapshots used by the `/weave status` command to
+ * confirm "did it work?" without grepping the gateway log. All timestamps
+ * are ms-epoch from the same clock as `ExporterObserverOptions.now`.
+ */
+export type ExporterStats = {
+  exportsSucceeded: number;
+  exportsFailed: number;
+  spansExported: number;
+  lastSuccessAt?: number;
+  lastFailureAt?: number;
+  lastFailureMessage?: string;
+  lastFailureHint?: string;
+};
+
+export type ObservedExporter = {
+  exporter: SpanExporter;
+  getStats: () => ExporterStats;
+};
+
+/**
  * Translate an OTLP export error into a human-readable message plus an
  * optional one-line hint. The message is always `err.message` (or
  * `String(err)`), preserved verbatim — the hint is *appended* by the
@@ -92,16 +112,25 @@ function extractHttpStatus(err: unknown, message: string): number | undefined {
 export function createExporterObserver(
   inner: SpanExporter,
   opts: ExporterObserverOptions,
-): SpanExporter {
+): ObservedExporter {
   const windowMs = opts.windowMs ?? 60_000;
   const now = opts.now ?? Date.now;
   let windowStart = 0;
   let suppressed = 0;
   let warnedThisWindow = false;
 
-  function reportFailure(err: Error | undefined): void {
-    const t = now();
+  const stats: ExporterStats = {
+    exportsSucceeded: 0,
+    exportsFailed: 0,
+    spansExported: 0,
+  };
+
+  function reportFailure(err: Error | undefined, t: number): void {
     const { message: msg, hint } = describeExportError(err);
+    stats.exportsFailed += 1;
+    stats.lastFailureAt = t;
+    stats.lastFailureMessage = msg;
+    stats.lastFailureHint = hint;
     const hintSuffix = hint ? `\nweave: hint: ${hint}` : "";
     if (windowStart === 0 || t - windowStart > windowMs) {
       // New window. If previous window suppressed any, report them.
@@ -125,16 +154,27 @@ export function createExporterObserver(
     suppressed += 1;
   }
 
-  return {
+  const exporter: SpanExporter = {
     export(spans: ReadableSpan[], cb) {
+      const batchSize = spans.length;
       inner.export(spans, (result) => {
+        const t = now();
         if (result.code === EXPORT_RESULT_FAILED) {
-          reportFailure((result as { error?: Error }).error);
+          reportFailure((result as { error?: Error }).error, t);
+        } else {
+          stats.exportsSucceeded += 1;
+          stats.spansExported += batchSize;
+          stats.lastSuccessAt = t;
         }
         cb(result);
       });
     },
     shutdown: inner.shutdown.bind(inner),
     ...(inner.forceFlush ? { forceFlush: inner.forceFlush.bind(inner) } : {}),
+  };
+
+  return {
+    exporter,
+    getStats: () => ({ ...stats }),
   };
 }

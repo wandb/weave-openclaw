@@ -13,6 +13,7 @@ import {
 } from "./src/hook-state.js";
 import { checkSdkCompat } from "./src/sdk-compat.js";
 import { createWeaveService } from "./src/service.js";
+import { formatWeaveStatus } from "./src/status-format.js";
 
 export default definePluginEntry({
   id: "weave",
@@ -38,16 +39,29 @@ export default definePluginEntry({
     // events do, so we capture them here.
     const hookState = getSharedWeaveHookState();
 
+    // TEMPORARY DEBUG: log every hook firing to confirm whether the runtime
+    // actually delivers them. Will be reverted after diagnosis. Logs through
+    // console.error so the gateway captures with the [weave] prefix.
+    // eslint-disable-next-line no-console
+    const traceHook = (name: string, ev: Record<string, unknown>): void => {
+      // eslint-disable-next-line no-console
+      console.error(
+        `[weave-hooks] ${name} runId=${String(ev.runId ?? "<none>")} callId=${String(ev.callId ?? "<none>")} toolCallId=${String(ev.toolCallId ?? "<none>")} keys=${Object.keys(ev).join(",")}`,
+      );
+    };
+
     // model_call_started carries callId; model_call_ended cleans up. We track
     // currentCallByRun so the llm_input / llm_output hooks (which DON'T carry
     // callId) can stamp their captures under the correct callId-keyed bucket.
     api.on("model_call_started", (event) => {
+      traceHook("model_call_started", event as unknown as Record<string, unknown>);
       if (event.runId && event.callId) {
         beginModelCall(hookState, event.runId, event.callId);
       }
     });
 
     api.on("llm_input", (event) => {
+      traceHook("llm_input", event as unknown as Record<string, unknown>);
       // The OpenClaw runtime fires `llm_input` BEFORE `model_call_started`,
       // so the callId is not yet registered when this handler runs. Buffer
       // the input under runId; `beginModelCall` will promote it to the
@@ -68,6 +82,7 @@ export default definePluginEntry({
     });
 
     api.on("llm_output", (event) => {
+      traceHook("llm_output", event as unknown as Record<string, unknown>);
       const callId = resolveCurrentCallId(hookState, event.runId);
       if (!callId) return;
       captureLlmOutput(hookState, callId, {
@@ -78,6 +93,7 @@ export default definePluginEntry({
     });
 
     api.on("before_tool_call", (event) => {
+      traceHook("before_tool_call", event as unknown as Record<string, unknown>);
       if (event.toolCallId) {
         captureToolStart(hookState, event.toolCallId, {
           toolName: event.toolName,
@@ -88,6 +104,7 @@ export default definePluginEntry({
     });
 
     api.on("after_tool_call", (event) => {
+      traceHook("after_tool_call", event as unknown as Record<string, unknown>);
       if (event.toolCallId) {
         captureToolEnd(hookState, event.toolCallId, {
           result: event.result,
@@ -104,6 +121,7 @@ export default definePluginEntry({
       emitMessageReceived,
       emitSessionStart,
       emitSessionEnd,
+      getStatus,
     } = createWeaveService({
       pluginConfig: api.pluginConfig,
       hookState,
@@ -229,5 +247,34 @@ export default definePluginEntry({
     });
 
     api.registerService(service);
+
+    // Operator-facing "did it work?" command. Renders the live snapshot from
+    // getStatus() — endpoint, project, auth source, export counters, and a
+    // dashboard link. Surfaces lifecycle (disabled / config-error / running /
+    // stopped) so a misconfiguration is visible in chat without grepping the
+    // gateway log for `weave: exporting to ...`.
+    api.registerCommand({
+      name: "weave",
+      description: "Show W&B Weave plugin status (endpoint, export counters, last error).",
+      acceptsArgs: true,
+      handler: (ctx) => {
+        const first = (ctx.args ?? "").trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+        if (first === "" || first === "status") {
+          return { text: formatWeaveStatus(getStatus()) };
+        }
+        if (first === "help") {
+          return {
+            text: [
+              "Usage: /weave [status|help]",
+              "  status   show plugin lifecycle, endpoint, and export counters (default)",
+              "  help     show this message",
+            ].join("\n"),
+          };
+        }
+        return {
+          text: `Unknown /weave subcommand: \`${first}\`. Try \`/weave status\` or \`/weave help\`.`,
+        };
+      },
+    });
   },
 });

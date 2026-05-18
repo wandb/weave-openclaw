@@ -29,7 +29,7 @@ import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import { setBoundedMap } from "./bounded-map.js";
 import { applyGenAiAliases, mapDiagnosticEventToWeaveSpan } from "./event-mapper.js";
 import { buildExporterHeaders } from "./exporter-headers.js";
-import { createExporterObserver } from "./exporter-observer.js";
+import { createExporterObserver, type ExporterStats } from "./exporter-observer.js";
 import type { WeaveHookState } from "./hook-state.js";
 import { InvokeAgentIndex } from "./invoke-agent-index.js";
 import { PendingTraceState } from "./pending-trace-state.js";
@@ -145,6 +145,46 @@ export type WeaveServiceWithCallbacks = {
   emitMessageReceived: (params: MessageReceivedParams) => void;
   emitSessionStart: (params: SessionStartParams) => void;
   emitSessionEnd: (params: SessionEndParams) => void;
+  /** Snapshot of plugin state, used by the `/weave status` command. */
+  getStatus: () => WeaveStatusSnapshot;
+};
+
+/**
+ * Snapshot returned by `getStatus()` and rendered by `/weave status`.
+ *
+ * `lifecycle` answers "is export happening?":
+ *   - `disabled` — config.enabled=false (operator opt-out)
+ *   - `not-started` — service.start() has not been called yet
+ *   - `config-error` — start() ran but bailed before exporter init
+ *   - `running` — start() completed; exports may be flowing
+ *   - `stopped` — stop() was called
+ */
+export type WeaveStatusSnapshot = {
+  pluginVersion: string;
+  lifecycle: "disabled" | "not-started" | "config-error" | "running" | "stopped";
+  /** Operator-actionable reason set when lifecycle is disabled/config-error. */
+  lifecycleDetail?: string;
+  /** When start() completed; absent if it never has. */
+  startedAt?: number;
+  config?: {
+    entity: string;
+    project: string;
+    endpoint: string;
+    serviceName: string;
+    agentVersion?: string;
+    flushIntervalMs: number;
+    captureSummary: string;
+    emitGenAiAliases: boolean;
+    stripSenderWrapper: boolean;
+    /** Where the W&B API key was resolved from (env / config / vault / etc.). */
+    authSource: string;
+    /** Weave Agents tab URL for this entity/project (cloud only). */
+    uiUrl?: string;
+  };
+  /** Exporter counters since start(). Undefined when no exporter is wired. */
+  exportStats?: ExporterStats;
+  /** OpenClaw spans currently indexed in the SpanRegistry. */
+  activeSpans: number;
 };
 
 export type CompactionSpanParams = {
@@ -269,6 +309,19 @@ export function createWeaveService(
   /** Wired into SpanRegistry; logs span-create / orphan-drop / trace-tree. */
   let debugLogger: DebugLogger | undefined;
 
+  /**
+   * Lifecycle state for `/weave status`. Distinct from `stopped` because the
+   * boolean alone can't tell "haven't started yet" from "stopped" from
+   * "started but disabled by config". Updated on every transition.
+   */
+  let lifecycle: WeaveStatusSnapshot["lifecycle"] = "not-started";
+  let lifecycleDetail: string | undefined;
+  let startedAt: number | undefined;
+  let resolvedAuthSource: string | undefined;
+  let resolvedUiUrl: string | undefined;
+  let resolvedCaptureSummary: string | undefined;
+  let getExporterStats: (() => ExporterStats) | undefined;
+
   const service: OpenClawPluginService = {
     id: "weave",
     async start(ctx) {
@@ -280,6 +333,13 @@ export function createWeaveService(
       }
 
       stopped = false;
+      lifecycle = "not-started";
+      lifecycleDetail = undefined;
+      startedAt = undefined;
+      resolvedAuthSource = undefined;
+      resolvedUiUrl = undefined;
+      resolvedCaptureSummary = undefined;
+      getExporterStats = undefined;
       const flags = parseDebugFlags(process.env.OPENCLAW_WEAVE_DEBUG);
       debugTraceTree = flags.traceTree;
       if (flags.spans || flags.traceTree) {
@@ -298,16 +358,22 @@ export function createWeaveService(
       const raw = (params.pluginConfig ?? {}) as RawWeavePluginConfig;
 
       if (raw.enabled === false) {
+        lifecycle = "disabled";
+        lifecycleDetail = "config.enabled=false";
         ctx.logger.info("weave: disabled via config.enabled=false");
         return;
       }
       if (typeof raw.entity !== "string" || raw.entity.length === 0) {
+        lifecycle = "config-error";
+        lifecycleDetail = "config.entity is required";
         ctx.logger.error(
           `weave: config.entity is required. Set plugins.entries.weave.config.entity in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B team or username slug, e.g. \`config: { entity: "your-team", project: "your-project" }\`.`,
         );
         return;
       }
       if (typeof raw.project !== "string" || raw.project.length === 0) {
+        lifecycle = "config-error";
+        lifecycleDetail = "config.project is required";
         ctx.logger.error(
           `weave: config.project is required. Set plugins.entries.weave.config.project in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B project name, e.g. \`config: { entity: "${raw.entity}", project: "your-project" }\`.`,
         );
@@ -331,11 +397,16 @@ export function createWeaveService(
             url: endpoint,
             headers: buildExporterHeaders(auth.key, `${raw.entity}/${raw.project}`),
           });
-          exporter = createExporterObserver(realExporter, {
+          const observed = createExporterObserver(realExporter, {
             onWarn: (msg) => ctx.logger.warn(msg),
           });
+          exporter = observed.exporter;
+          getExporterStats = observed.getStats;
         }
+        resolvedAuthSource = authSource;
       } catch (err) {
+        lifecycle = "config-error";
+        lifecycleDetail = formatErr(err);
         ctx.logger.error(`weave: configuration error: ${formatErr(err)}`);
         return;
       }
@@ -443,8 +514,12 @@ export function createWeaveService(
           : captureFields.length === 5
             ? "full"
             : captureFields.join(",");
+      resolvedCaptureSummary = captureSummary;
+      resolvedUiUrl = `${resolveWeaveAppUrl(raw)}/${projectId}/weave`;
+      lifecycle = "running";
+      startedAt = Date.now();
       ctx.logger.info(`weave: exporting to ${endpoint}`);
-      ctx.logger.info(`weave: dashboard ${resolveWeaveAppUrl(raw)}/${projectId}/weave`);
+      ctx.logger.info(`weave: dashboard ${resolvedUiUrl}`);
       ctx.logger.info(
         `weave: project=${projectId} service=${serviceName} agentVersion=${resolvedAgentVersion} ` +
           `auth=${authSource} flushIntervalMs=${flushInterval} ` +
@@ -456,6 +531,7 @@ export function createWeaveService(
 
     async stop(ctx) {
       stopped = true;
+      lifecycle = "stopped";
       try {
         await teardownInternal();
       } catch (err) {
@@ -645,6 +721,35 @@ export function createWeaveService(
     span.addEvent("session_ended", attrs);
   }
 
+  function getStatus(): WeaveStatusSnapshot {
+    const snap: WeaveStatusSnapshot = {
+      pluginVersion: PACKAGE_VERSION,
+      lifecycle,
+      lifecycleDetail,
+      startedAt,
+      activeSpans: spans?.size() ?? 0,
+    };
+    if (resolvedCfg) {
+      snap.config = {
+        entity: resolvedCfg.entity,
+        project: resolvedCfg.project,
+        endpoint: resolvedCfg.endpoint,
+        serviceName: resolvedCfg.serviceName,
+        agentVersion: resolvedCfg.agentVersion,
+        flushIntervalMs: resolvedCfg.flushIntervalMs,
+        captureSummary: resolvedCaptureSummary ?? "unknown",
+        emitGenAiAliases: resolvedCfg.emitGenAiAliases,
+        stripSenderWrapper: resolvedCfg.stripSenderWrapper,
+        authSource: resolvedAuthSource ?? "unknown",
+        uiUrl: resolvedUiUrl,
+      };
+    }
+    if (getExporterStats) {
+      snap.exportStats = getExporterStats();
+    }
+    return snap;
+  }
+
   return {
     service,
     emitCompactionSpan,
@@ -654,6 +759,7 @@ export function createWeaveService(
     emitMessageReceived,
     emitSessionStart,
     emitSessionEnd,
+    getStatus,
   };
 
   function handleEvent(

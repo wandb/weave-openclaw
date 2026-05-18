@@ -23,17 +23,24 @@ function makeFakeExporter(outcomes: Array<"ok" | Error>): SpanExporter {
   };
 }
 
-async function exportOnce(observed: SpanExporter): Promise<void> {
-  await new Promise<void>((res) => observed.export([], () => res()));
+async function exportOnce(
+  observed: SpanExporter,
+  spans: ReadableSpan[] = [],
+): Promise<void> {
+  await new Promise<void>((res) => observed.export(spans, () => res()));
+}
+
+function fakeSpan(): ReadableSpan {
+  return {} as ReadableSpan;
 }
 
 describe("createExporterObserver", () => {
   test("forwards successful exports without warnings", async () => {
     const inner = makeFakeExporter(["ok", "ok"]);
     const warn = vi.fn();
-    const observed = createExporterObserver(inner, { onWarn: warn });
-    await exportOnce(observed);
-    await exportOnce(observed);
+    const { exporter } = createExporterObserver(inner, { onWarn: warn });
+    await exportOnce(exporter);
+    await exportOnce(exporter);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -43,13 +50,13 @@ describe("createExporterObserver", () => {
       new Error("network fail"),
     ]);
     const warn = vi.fn();
-    const observed = createExporterObserver(inner, {
+    const { exporter } = createExporterObserver(inner, {
       onWarn: warn,
       windowMs: 60_000,
       now: () => 1000,
     });
-    await exportOnce(observed);
-    await exportOnce(observed);
+    await exportOnce(exporter);
+    await exportOnce(exporter);
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).toContain("network fail");
   });
@@ -62,15 +69,15 @@ describe("createExporterObserver", () => {
     ]);
     const warn = vi.fn();
     let now = 1000;
-    const observed = createExporterObserver(inner, {
+    const { exporter } = createExporterObserver(inner, {
       onWarn: warn,
       windowMs: 60_000,
       now: () => now,
     });
-    await exportOnce(observed);
+    await exportOnce(exporter);
     now = 1000 + 60_001;
-    await exportOnce(observed);
-    await exportOnce(observed);
+    await exportOnce(exporter);
+    await exportOnce(exporter);
     expect(warn).toHaveBeenCalledTimes(2);
   });
 
@@ -83,16 +90,16 @@ describe("createExporterObserver", () => {
     ]);
     const warn = vi.fn();
     let now = 1000;
-    const observed = createExporterObserver(inner, {
+    const { exporter } = createExporterObserver(inner, {
       onWarn: warn,
       windowMs: 60_000,
       now: () => now,
     });
-    await exportOnce(observed);
-    await exportOnce(observed);
-    await exportOnce(observed);
+    await exportOnce(exporter);
+    await exportOnce(exporter);
+    await exportOnce(exporter);
     now = 1000 + 60_001;
-    await exportOnce(observed);
+    await exportOnce(exporter);
     expect(warn).toHaveBeenCalledTimes(2);
     // Second warn carries the suppression count from window 1.
     expect(warn.mock.calls[1][0]).toContain("suppressed");
@@ -107,8 +114,8 @@ describe("createExporterObserver", () => {
       },
       shutdown: innerShutdown,
     };
-    const observed = createExporterObserver(inner, { onWarn: vi.fn() });
-    await observed.shutdown();
+    const { exporter } = createExporterObserver(inner, { onWarn: vi.fn() });
+    await exporter.shutdown();
     expect(innerShutdown).toHaveBeenCalled();
   });
 
@@ -121,10 +128,62 @@ describe("createExporterObserver", () => {
       shutdown: async () => {},
       forceFlush: innerFlush,
     };
-    const observed = createExporterObserver(inner, { onWarn: vi.fn() });
-    expect(observed.forceFlush).toBeDefined();
-    await observed.forceFlush!();
+    const { exporter } = createExporterObserver(inner, { onWarn: vi.fn() });
+    expect(exporter.forceFlush).toBeDefined();
+    await exporter.forceFlush!();
     expect(innerFlush).toHaveBeenCalled();
+  });
+
+  test("getStats counts successes, failures, spans, and last timestamps", async () => {
+    const inner = makeFakeExporter([
+      "ok",
+      "ok",
+      new Error("boom"),
+      "ok",
+    ]);
+    let now = 1000;
+    const { exporter, getStats } = createExporterObserver(inner, {
+      onWarn: vi.fn(),
+      now: () => now,
+    });
+    await exportOnce(exporter, [fakeSpan(), fakeSpan()]);
+    now = 2000;
+    await exportOnce(exporter, [fakeSpan()]);
+    now = 3000;
+    await exportOnce(exporter);
+    now = 4000;
+    await exportOnce(exporter, [fakeSpan(), fakeSpan(), fakeSpan()]);
+    const stats = getStats();
+    expect(stats.exportsSucceeded).toBe(3);
+    expect(stats.exportsFailed).toBe(1);
+    expect(stats.spansExported).toBe(6);
+    expect(stats.lastSuccessAt).toBe(4000);
+    expect(stats.lastFailureAt).toBe(3000);
+    expect(stats.lastFailureMessage).toBe("boom");
+  });
+
+  test("getStats captures last failure hint when error is recognisable", async () => {
+    const inner = makeFakeExporter([
+      Object.assign(new Error("Unauthorized"), { code: 401 }),
+    ]);
+    const { exporter, getStats } = createExporterObserver(inner, {
+      onWarn: vi.fn(),
+    });
+    await exportOnce(exporter);
+    const stats = getStats();
+    expect(stats.lastFailureMessage).toBe("Unauthorized");
+    expect(stats.lastFailureHint).toMatch(/WANDB_API_KEY/);
+  });
+
+  test("getStats returns a snapshot (mutations do not leak back)", async () => {
+    const inner = makeFakeExporter(["ok"]);
+    const { exporter, getStats } = createExporterObserver(inner, {
+      onWarn: vi.fn(),
+    });
+    await exportOnce(exporter, [fakeSpan()]);
+    const snap = getStats();
+    snap.exportsSucceeded = 999;
+    expect(getStats().exportsSucceeded).toBe(1);
   });
 });
 
@@ -191,8 +250,8 @@ describe("createExporterObserver hint integration", () => {
       Object.assign(new Error("Unauthorized"), { code: 401 }),
     ]);
     const warn = vi.fn();
-    const observed = createExporterObserver(inner, { onWarn: warn });
-    await exportOnce(observed);
+    const { exporter } = createExporterObserver(inner, { onWarn: warn });
+    await exportOnce(exporter);
     expect(warn).toHaveBeenCalledTimes(1);
     const line = String(warn.mock.calls[0][0]);
     expect(line).toContain("export failure: Unauthorized");
@@ -203,8 +262,8 @@ describe("createExporterObserver hint integration", () => {
   test("warning has no hint line for unrecognised errors", async () => {
     const inner = makeFakeExporter([new Error("opaque mystery")]);
     const warn = vi.fn();
-    const observed = createExporterObserver(inner, { onWarn: warn });
-    await exportOnce(observed);
+    const { exporter } = createExporterObserver(inner, { onWarn: warn });
+    await exportOnce(exporter);
     const line = String(warn.mock.calls[0][0]);
     expect(line).toContain("opaque mystery");
     expect(line).not.toContain("weave: hint:");
