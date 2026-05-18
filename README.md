@@ -52,6 +52,12 @@ plugin reads `WANDB_API_KEY` from the environment:
       weave: {
         enabled: true,
         config: { entity: "your-team", project: "your-project" },
+        // Required for the plugin to subscribe to llm_input / llm_output /
+        // agent_end. Without it, OpenClaw's runtime blocks those hooks and
+        // your Weave Agents-tab spans land WITHOUT input/output text or
+        // tool args/results. Look for `[plugins] typed hook "llm_input"
+        // blocked` in the gateway log if you're seeing empty traces.
+        hooks: { allowConversationAccess: true },
       },
     },
   },
@@ -89,14 +95,22 @@ Full configuration with every option:
           agentName: "my-agent",
           agentVersion: "v1.0",
           agentDescription: "What my agent does.",
-          // Off by default. Enable only when retention policy is approved.
+          // ON by default. By the time you've granted entity/project,
+          // exported WANDB_API_KEY, and flipped allowConversationAccess
+          // above, you've consented to W&B receiving conversation data —
+          // making the plugin useless out-of-the-box for the sake of a
+          // fifth gate would be theater. Set { enabled: false } for a
+          // hard off (compliance / retention policy), or flip individual
+          // sub-flags for granular opt-out (each defaults to true; only
+          // explicit false disables). All captured strings pass through
+          // OpenClaw's redactSensitiveText before emission.
           captureContent: {
-            enabled: false,
-            inputMessages: false,
-            outputMessages: false,
-            toolArguments: false,
-            toolResults: false,
-            systemInstructions: false,
+            enabled: true,
+            inputMessages: true,
+            outputMessages: true,
+            toolArguments: true,
+            toolResults: true,
+            systemInstructions: true,
           },
           // Optional. Strip OpenClaw's metadata-wrapper prefix
           // (`Conversation info` / `Sender (untrusted metadata)` /
@@ -394,6 +408,28 @@ Walk this checklist top-to-bottom:
    `auth=env:WANDB_API_KEY` (or `file:...` / `env:<custom>` /
    `literal`). If this is `env:WANDB_API_KEY` and you set the key in
    a different env var, the plugin is reading the wrong key.
+
+### Spans land but input/output text is empty
+
+Look in the gateway log for:
+
+```
+[plugins] typed hook "llm_input"  blocked because non-bundled plugins must set
+                                  plugins.entries.weave.hooks.allowConversationAccess=true
+[plugins] typed hook "llm_output" blocked ...
+[plugins] typed hook "agent_end"  blocked ...
+```
+
+OpenClaw's runtime gates content-bearing hooks behind an operator opt-in.
+The plugin's manifest declares `policy.allowConversationAccess: true`, but
+for third-party plugins the gateway also requires you to flip
+`plugins.entries.weave.hooks.allowConversationAccess: true` in your config.
+Two-key consent. Once you set it and restart the gateway, `llm_input` /
+`llm_output` / `agent_end` will fire and content attrs populate normally.
+
+Span structure (`invoke_agent` / `chat` / `execute_tool`) and cost / usage
+data come through diagnostic events, not hooks, so they keep working even
+without the hooks gate flipped.
 
 ### Export-failure warnings in the gateway log
 

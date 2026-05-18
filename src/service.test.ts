@@ -842,7 +842,56 @@ describe("createWeaveService (integration)", () => {
     expect(ev).toBeDefined();
     expect(ev?.attributes?.["weave.message.from"]).toBe("alice");
     expect(ev?.attributes?.["weave.message.channel"]).toBe("telegram");
-    // Content not emitted because captureContent is off by default.
+    // Content IS emitted because captureContent defaults to full.
+    expect(ev?.attributes?.["weave.message.content"]).toBe(
+      "what's the weather in NYC?",
+    );
+  });
+
+  test("captureContent { enabled: false } suppresses message_received content", async () => {
+    const { service, emitMessageReceived } = createWeaveService({
+      pluginConfig: {
+        entity: "acme",
+        project: "agents",
+        agentName: "x",
+        captureContent: { enabled: false },
+      },
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-msg-off",
+      harnessId: "x",
+      sessionKey: "conv-msg-off",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+
+    emitMessageReceived({
+      runId: "r-msg-off",
+      from: "alice",
+      content: "what's the weather in NYC?",
+    });
+
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-msg-off",
+      harnessId: "x",
+      durationMs: 100,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = exporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "message_received");
+    expect(ev?.attributes?.["weave.message.from"]).toBe("alice");
     expect(ev?.attributes?.["weave.message.content"]).toBeUndefined();
   });
 
@@ -1255,7 +1304,7 @@ describe("createWeaveService (integration)", () => {
     expect(joined).toContain("auth=");
     expect(joined).toContain("exporting to https://trace.wandb.ai/agents/otel/v1/traces");
     expect(joined).toContain("flushIntervalMs=5000");
-    expect(joined).toContain("captureContent=off");
+    expect(joined).toContain("captureContent=full");
     expect(joined).toContain("emitGenAiAliases=true");
     expect(joined).toContain("stripSenderWrapper=false");
     await service.stop?.(ctx);

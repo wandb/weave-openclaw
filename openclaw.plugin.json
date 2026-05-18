@@ -68,16 +68,16 @@
       "captureContent": {
         "type": "object",
         "additionalProperties": false,
-        "default": { "enabled": false },
+        "default": { "enabled": true },
         "properties": {
-          "enabled": { "type": "boolean", "default": false },
-          "inputMessages": { "type": "boolean", "default": false },
-          "outputMessages": { "type": "boolean", "default": false },
-          "toolArguments": { "type": "boolean", "default": false },
-          "toolResults": { "type": "boolean", "default": false },
-          "systemInstructions": { "type": "boolean", "default": false }
+          "enabled": { "type": "boolean", "default": true },
+          "inputMessages": { "type": "boolean", "default": true },
+          "outputMessages": { "type": "boolean", "default": true },
+          "toolArguments": { "type": "boolean", "default": true },
+          "toolResults": { "type": "boolean", "default": true },
+          "systemInstructions": { "type": "boolean", "default": true }
         },
-        "description": "Best-effort content capture. Reads inputMessages/outputMessages/toolInput/toolOutput/systemPrompt fields from internal diagnostic events when present. Always passes through OpenClaw's redactSensitiveText."
+        "description": "Conversation content captured into spans. Defaults to full capture so traces are useful out of the box. Set { enabled: false } for a hard off, or flip individual sub-flags (e.g. { toolResults: false }) for granular opt-out. Sub-flags default to true; only explicit false disables a field. All captured strings pass through OpenClaw's redactSensitiveText before emission."
       },
       "flushIntervalMs": {
         "type": "integer",
@@ -110,7 +110,7 @@
     },
     "captureContent.enabled": {
       "label": "Capture conversation content",
-      "help": "Off by default. Enable only when your W&B project's retention policy is approved for prompt/response/tool text."
+      "help": "On by default — empty traces aren't useful. Turn off (or flip individual sub-flags) when compliance/retention policy requires it."
     }
   }
 }

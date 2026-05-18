@@ -437,7 +437,12 @@ export function createWeaveService(
       if (resolvedCfg.captureContent.toolArguments) captureFields.push("toolArguments");
       if (resolvedCfg.captureContent.toolResults) captureFields.push("toolResults");
       if (resolvedCfg.captureContent.systemInstructions) captureFields.push("systemInstructions");
-      const captureSummary = captureFields.length === 0 ? "off" : captureFields.join(",");
+      const captureSummary =
+        captureFields.length === 0
+          ? "off"
+          : captureFields.length === 5
+            ? "full"
+            : captureFields.join(",");
       ctx.logger.info(`weave: exporting to ${endpoint}`);
       ctx.logger.info(
         `weave: project=${projectId} service=${serviceName} agentVersion=${resolvedAgentVersion} ` +

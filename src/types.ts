@@ -124,18 +124,47 @@ export const NO_CONTENT_CAPTURE: WeaveContentCapture = Object.freeze({
   systemInstructions: false,
 });
 
+export const FULL_CONTENT_CAPTURE: WeaveContentCapture = Object.freeze({
+  enabled: true,
+  inputMessages: true,
+  outputMessages: true,
+  toolArguments: true,
+  toolResults: true,
+  systemInstructions: true,
+});
+
+/**
+ * Resolve `captureContent` config to its fully-specified shape.
+ *
+ * Defaults to FULL capture — the plugin's purpose is to make traces useful
+ * in Weave, and empty input/output boxes defeat that. By the time an
+ * operator has installed this plugin, set their entity/project, exported
+ * `WANDB_API_KEY`, and flipped OpenClaw's `allowConversationAccess: true`
+ * hooks gate, they've already consented to the data path multiple times.
+ *
+ * Operators who need to opt out (compliance, retention policy) explicitly
+ * set `captureContent: { enabled: false }` for a hard off, or flip
+ * individual sub-flags (`captureContent: { toolResults: false }`) for
+ * granular control.
+ *
+ * Sub-flags default to `true` when `enabled` is true or unset; they only
+ * go off when explicitly set to `false`.
+ */
 export function resolveContentCapture(
   raw: RawWeavePluginConfig["captureContent"],
 ): WeaveContentCapture {
-  if (!raw || raw.enabled !== true) {
+  if (raw && raw.enabled === false) {
     return NO_CONTENT_CAPTURE;
+  }
+  if (!raw) {
+    return FULL_CONTENT_CAPTURE;
   }
   return {
     enabled: true,
-    inputMessages: raw.inputMessages === true,
-    outputMessages: raw.outputMessages === true,
-    toolArguments: raw.toolArguments === true,
-    toolResults: raw.toolResults === true,
-    systemInstructions: raw.systemInstructions === true,
+    inputMessages: raw.inputMessages !== false,
+    outputMessages: raw.outputMessages !== false,
+    toolArguments: raw.toolArguments !== false,
+    toolResults: raw.toolResults !== false,
+    systemInstructions: raw.systemInstructions !== false,
   };
 }
