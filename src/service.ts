@@ -302,11 +302,15 @@ export function createWeaveService(
         return;
       }
       if (typeof raw.entity !== "string" || raw.entity.length === 0) {
-        ctx.logger.error("weave: config.entity is required");
+        ctx.logger.error(
+          `weave: config.entity is required. Set plugins.entries.weave.config.entity in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B team or username slug, e.g. \`config: { entity: "your-team", project: "your-project" }\`.`,
+        );
         return;
       }
       if (typeof raw.project !== "string" || raw.project.length === 0) {
-        ctx.logger.error("weave: config.project is required");
+        ctx.logger.error(
+          `weave: config.project is required. Set plugins.entries.weave.config.project in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B project name, e.g. \`config: { entity: "${raw.entity}", project: "your-project" }\`.`,
+        );
         return;
       }
 
