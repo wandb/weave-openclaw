@@ -39,29 +39,16 @@ export default definePluginEntry({
     // events do, so we capture them here.
     const hookState = getSharedWeaveHookState();
 
-    // TEMPORARY DEBUG: log every hook firing to confirm whether the runtime
-    // actually delivers them. Will be reverted after diagnosis. Logs through
-    // console.error so the gateway captures with the [weave] prefix.
-    // eslint-disable-next-line no-console
-    const traceHook = (name: string, ev: Record<string, unknown>): void => {
-      // eslint-disable-next-line no-console
-      console.error(
-        `[weave-hooks] ${name} runId=${String(ev.runId ?? "<none>")} callId=${String(ev.callId ?? "<none>")} toolCallId=${String(ev.toolCallId ?? "<none>")} keys=${Object.keys(ev).join(",")}`,
-      );
-    };
-
     // model_call_started carries callId; model_call_ended cleans up. We track
     // currentCallByRun so the llm_input / llm_output hooks (which DON'T carry
     // callId) can stamp their captures under the correct callId-keyed bucket.
     api.on("model_call_started", (event) => {
-      traceHook("model_call_started", event as unknown as Record<string, unknown>);
       if (event.runId && event.callId) {
         beginModelCall(hookState, event.runId, event.callId);
       }
     });
 
     api.on("llm_input", (event) => {
-      traceHook("llm_input", event as unknown as Record<string, unknown>);
       // The OpenClaw runtime fires `llm_input` BEFORE `model_call_started`,
       // so the callId is not yet registered when this handler runs. Buffer
       // the input under runId; `beginModelCall` will promote it to the
@@ -82,7 +69,6 @@ export default definePluginEntry({
     });
 
     api.on("llm_output", (event) => {
-      traceHook("llm_output", event as unknown as Record<string, unknown>);
       const callId = resolveCurrentCallId(hookState, event.runId);
       if (!callId) return;
       captureLlmOutput(hookState, callId, {
@@ -90,10 +76,18 @@ export default definePluginEntry({
         lastAssistant: event.lastAssistant,
         usage: event.usage,
       });
+      // OpenClaw emits `model.call.completed` (async-queued diagnostic event)
+      // BEFORE the agent loop fires this hook. So when our chat-span finalize
+      // handler saw model.call.completed, hookState.llmOutputs[callId] was
+      // still empty. The service stashed the close in `pendingChatCloseByCallId`
+      // instead of finalizing. Now that we've captured assistantTexts /
+      // lastAssistant / usage above, trigger the real close — `flushChatSpan`
+      // re-runs the mapper with the populated hookState and stamps content
+      // attrs on the chat span before ending it.
+      flushChatSpan(callId);
     });
 
     api.on("before_tool_call", (event) => {
-      traceHook("before_tool_call", event as unknown as Record<string, unknown>);
       if (event.toolCallId) {
         captureToolStart(hookState, event.toolCallId, {
           toolName: event.toolName,
@@ -104,7 +98,6 @@ export default definePluginEntry({
     });
 
     api.on("after_tool_call", (event) => {
-      traceHook("after_tool_call", event as unknown as Record<string, unknown>);
       if (event.toolCallId) {
         captureToolEnd(hookState, event.toolCallId, {
           result: event.result,
@@ -121,6 +114,7 @@ export default definePluginEntry({
       emitMessageReceived,
       emitSessionStart,
       emitSessionEnd,
+      flushChatSpan,
       getStatus,
     } = createWeaveService({
       pluginConfig: api.pluginConfig,

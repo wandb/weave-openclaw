@@ -145,6 +145,13 @@ export type WeaveServiceWithCallbacks = {
   emitMessageReceived: (params: MessageReceivedParams) => void;
   emitSessionStart: (params: SessionStartParams) => void;
   emitSessionEnd: (params: SessionEndParams) => void;
+  /**
+   * Finalize a chat span whose `model.call.completed` was deferred. Called
+   * from the `llm_output` hook in index.ts after capturing assistantTexts /
+   * lastAssistant / usage into hookState. See the comment on
+   * `pendingChatCloseByCallId` for the timing reason this exists.
+   */
+  flushChatSpan: (callId: string) => void;
   /** Snapshot of plugin state, used by the `/weave status` command. */
   getStatus: () => WeaveStatusSnapshot;
 };
@@ -302,6 +309,30 @@ export function createWeaveService(
    * carry a spanId — only the subagent's runId.
    */
   const subagentSpansBySubagentRunId = new Map<string, Span>();
+
+  /**
+   * Chat-span finalizes whose actual close has been deferred until the
+   * `llm_output` hook fires. Keyed by the model call's `callId`.
+   *
+   * Why: OpenClaw's runtime emits `model.call.completed` (async-queued via
+   * setImmediate) BEFORE the agent loop fires `llm_output` (which carries
+   * the assistant content). If we closed the chat span at model.call.completed
+   * time, hookState would still be empty and `weave.output.messages` / usage
+   * / reasoning_content would all be blank. We stash here, then flush from
+   * the llm_output hook handler in index.ts (via the `flushChatSpan`
+   * callback).
+   */
+  type PendingChatClose = {
+    openclawSpanId: string;
+    attrs: Record<string, string | number | boolean>;
+    status: "ok" | "error";
+    errorType?: string;
+    endTimeMs: number;
+    traceId: string;
+    conversationIdHint: string | undefined;
+    event: DiagnosticEventPayload;
+  };
+  const pendingChatCloseByCallId = new Map<string, PendingChatClose>();
 
   let stopped = false;
   /** Read at start() time so env changes take effect on plugin reload. */
@@ -759,6 +790,7 @@ export function createWeaveService(
     emitMessageReceived,
     emitSessionStart,
     emitSessionEnd,
+    flushChatSpan,
     getStatus,
   };
 
@@ -852,33 +884,116 @@ export function createWeaveService(
     }
 
     // result.kind === "finalize"
+    //
+    // Chat-span special case: OpenClaw's runtime fires `model.call.completed`
+    // (async-queued diagnostic event via setImmediate) BEFORE the agent loop
+    // fires the `llm_output` hook (which carries assistantTexts / lastAssistant
+    // / usage). At model.call.completed time, hookState.llmOutputs[callId] is
+    // empty, so the mapper has nothing to put in weave.output.messages /
+    // weave.usage.* / weave.reasoning_content. Closing now would seal the
+    // chat span with empty content.
+    //
+    // Fix: when model.call.completed fires for a chat span with a callId,
+    // stash the finalize args keyed by callId and DON'T close. The `llm_output`
+    // hook handler in index.ts calls `flushChatSpan(callId)` after writing to
+    // hookState, which re-runs the mapper (now sees populated hookState) and
+    // closes the span with the correct content.
+    //
+    // Safety nets: model.call.error fires without llm_output, so we close
+    // immediately on error. Invoke_agent finalize flushes any orphan pending
+    // chat closes for that trace. Teardown flushes everything remaining.
+    if (event.type === "model.call.completed") {
+      const callId = nonEmptyString(e.callId);
+      if (callId) {
+        pendingChatCloseByCallId.set(callId, {
+          openclawSpanId: result.openclawSpanId,
+          attrs: result.attrs,
+          status: result.status,
+          errorType: result.errorType,
+          endTimeMs: result.endTimeMs,
+          traceId,
+          conversationIdHint,
+          event,
+        });
+        return;
+      }
+      // No callId on event payload — can't pair with llm_output. Fall through
+      // to immediate close so the span doesn't leak.
+    }
+    applyFinalize(result.openclawSpanId, result.attrs, result.status, result.errorType, result.endTimeMs, traceId);
+  }
+
+  /**
+   * Re-finalize and close a chat span whose `model.call.completed` diagnostic
+   * event was deferred. Called from index.ts's `llm_output` hook after
+   * capturing the assistant content into hookState. Re-runs the mapper so
+   * `weave.input.messages` / `weave.output.messages` / `weave.usage.*` /
+   * `weave.reasoning_content` get built from the now-populated hookState.
+   */
+  function flushChatSpan(callId: string): void {
+    if (!spans || !resolvedCfg) return;
+    const pending = pendingChatCloseByCallId.get(callId);
+    if (!pending) return;
+    pendingChatCloseByCallId.delete(callId);
+    const fresh = mapDiagnosticEventToWeaveSpan(pending.event, resolvedCfg, {
+      hookState: params.hookState,
+      conversationIdHint: pending.conversationIdHint,
+    });
+    const attrs =
+      fresh.kind === "finalize" ? fresh.attrs : pending.attrs;
+    applyFinalize(
+      pending.openclawSpanId,
+      attrs,
+      pending.status,
+      pending.errorType,
+      pending.endTimeMs,
+      pending.traceId,
+    );
+  }
+
+  /** Force-close every chat span that was deferred but never flushed (e.g.
+   *  llm_output never fired for some pending callId). Used on invoke_agent
+   *  finalize and on teardown so spans don't leak. */
+  function flushAllPendingChatSpans(traceId?: string): void {
+    if (pendingChatCloseByCallId.size === 0) return;
+    const toFlush: string[] = [];
+    for (const [callId, p] of pendingChatCloseByCallId) {
+      if (traceId === undefined || p.traceId === traceId) toFlush.push(callId);
+    }
+    for (const callId of toFlush) flushChatSpan(callId);
+  }
+
+  /** Shared finalize tail used by both immediate and deferred close paths. */
+  function applyFinalize(
+    openclawSpanId: string,
+    attrs: Record<string, string | number | boolean>,
+    status: "ok" | "error",
+    errorType: string | undefined,
+    endTimeMs: number,
+    traceId: string,
+  ): void {
+    if (!spans || !invokeAgents || !pending) return;
     const exceptionEvent =
-      result.status === "error"
+      status === "error"
         ? {
-            name: result.errorType ?? "error",
+            name: errorType ?? "error",
             // Per OTel spec (`docs/general/recording-errors.md`): set status,
             // set error.type, AND record an exception event with
-            // `exception.{type,message}`. The diagnostic-event payload carries
-            // categorical info (errorType, failureKind, phase, deniedReason)
-            // but not the original throwable — synthesise an exception event
-            // from the structured fields so OTel-aware UIs (Honeycomb's
-            // exceptions tab, Datadog's error inspector) light up correctly.
-            message: synthesiseExceptionMessage(result.errorType, result.attrs),
+            // `exception.{type,message}`. Synthesised from the structured
+            // fields since the diagnostic-event payload doesn't carry the
+            // original throwable.
+            message: synthesiseExceptionMessage(errorType, attrs),
           }
         : undefined;
     const closed = spans.closeSpan({
-      openclawSpanId: result.openclawSpanId,
-      endTimeMs: result.endTimeMs,
-      statusCode:
-        result.status === "ok" ? SpanStatusCode.OK : SpanStatusCode.ERROR,
-      statusMessage: result.errorType,
-      attrs: result.attrs,
+      openclawSpanId,
+      endTimeMs,
+      statusCode: status === "ok" ? SpanStatusCode.OK : SpanStatusCode.ERROR,
+      statusMessage: errorType,
+      attrs,
       exception: exceptionEvent,
     });
-    if (!closed) {
-      // Started before our subscription, or we already finalized this span.
-      return;
-    }
+    if (!closed) return;
     if (invokeAgents.lookup({ by: "traceId", value: traceId }) === closed) {
       // Stamp final running totals on the invoke_agent and clear per-trace
       // buckets. Unregister from every InvokeAgentIndex axis so post-finalize
@@ -888,8 +1003,12 @@ export function createWeaveService(
       pending.finalizeInvokeAgentSpan({ span: closed, traceId });
       invokeAgents.unregister(closed);
       invokeAgents.forgetSessionKey(traceId);
+      // Force-flush any chat spans deferred for this trace whose llm_output
+      // hook never fired (rare: agent loop errored out between
+      // model.call.completed and runLlmOutput).
+      flushAllPendingChatSpans(traceId);
     }
-    if (debugTraceTree) spans.dumpTree(`finalize ${result.openclawSpanId}`);
+    if (debugTraceTree) spans.dumpTree(`finalize ${openclawSpanId}`);
   }
 
   /**
@@ -1025,6 +1144,12 @@ export function createWeaveService(
       // ignore
     }
     unsubscribe = undefined;
+    // Best-effort flush any chat spans that were deferred and never reached
+    // their llm_output hook. After endAllRemaining() the SpanRegistry would
+    // close them with empty content anyway; do this first so they ship with
+    // whatever hookState managed to capture.
+    flushAllPendingChatSpans();
+    pendingChatCloseByCallId.clear();
     spans?.endAllRemaining();
     invokeAgents?.clear();
     pending?.clear();
