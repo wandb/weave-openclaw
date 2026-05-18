@@ -418,12 +418,14 @@ function finalizeChat(
   // event-payload fields if a future internal event carries them. When the 8KiB
   // clamp triggers, emit a sibling boolean flag so dashboards can filter for
   // truncated traces without string-matching the inline marker.
+  let phaseRedactions = 0;
   if (cfg.captureContent.enabled) {
     if (cfg.captureContent.inputMessages) {
       const r = buildInputMessagesWithFlag(llm.input, e, cfg);
       if (r) {
         attrs["weave.input.messages"] = r.value;
         if (r.truncated) attrs["weave.input.messages_truncated"] = true;
+        phaseRedactions += r.redactions;
       }
     }
     if (cfg.captureContent.outputMessages) {
@@ -431,6 +433,7 @@ function finalizeChat(
       if (r) {
         attrs["weave.output.messages"] = r.value;
         if (r.truncated) attrs["weave.output.messages_truncated"] = true;
+        phaseRedactions += r.redactions;
       }
     }
     if (cfg.captureContent.systemInstructions) {
@@ -446,6 +449,7 @@ function finalizeChat(
         if (r) {
           attrs["weave.system_instructions"] = r.value;
           if (r.truncated) attrs["weave.system_instructions_truncated"] = true;
+          phaseRedactions += r.redactions;
         }
       }
     }
@@ -458,9 +462,11 @@ function finalizeChat(
       if (r) {
         attrs["weave.reasoning_content"] = r.value;
         if (r.truncated) attrs["weave.reasoning_content_truncated"] = true;
+        phaseRedactions += r.redactions;
       }
     }
   }
+  if (phaseRedactions > 0) attrs["weave.redactions.count"] = phaseRedactions;
 
   if (errorType) attrs["error.type"] = errorType;
   const failureKind = asString(e.failureKind);
@@ -510,6 +516,7 @@ function startTool(
     if (r) {
       attrs["weave.tool.call.arguments"] = r.value;
       if (r.truncated) attrs["weave.tool.call.arguments_truncated"] = true;
+      if (r.redactions > 0) attrs["weave.redactions.count"] = r.redactions;
     }
   }
 
@@ -543,6 +550,7 @@ function finalizeTool(
     if (r) {
       attrs["weave.tool.call.result"] = r.value;
       if (r.truncated) attrs["weave.tool.call.result_truncated"] = true;
+      if (r.redactions > 0) attrs["weave.redactions.count"] = r.redactions;
     }
   }
   if (errorType) attrs["error.type"] = errorType;

@@ -9,7 +9,6 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["entity", "project"],
     "properties": {
       "enabled": {
         "type": "boolean",
@@ -17,12 +16,12 @@
       },
       "entity": {
         "type": "string",
-        "description": "W&B team or username slug.",
+        "description": "W&B team or username slug. Optional: when omitted the plugin defaults to $USER (or $USERNAME) and logs a dev-defaults warning — set explicitly for production.",
         "minLength": 1
       },
       "project": {
         "type": "string",
-        "description": "W&B project name.",
+        "description": "W&B project name. Optional: when omitted the plugin defaults to 'openclaw-default' and logs a dev-defaults warning — set explicitly for production.",
         "minLength": 1
       },
       "apiKey": {

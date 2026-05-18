@@ -374,6 +374,69 @@ describe("mapDiagnosticEventToWeaveSpan", () => {
     expect(typeof r.attrs["weave.input.messages"]).toBe("string");
   });
 
+  test("weave.redactions.count surfaces the per-phase tally when content is redacted", () => {
+    // Default OpenClaw redact patterns match SECRET_KEY=<≥18-char value>.
+    // Use two redactable leaves (input + output) to verify counting sums.
+    const REDACTABLE = "SECRET_KEY=mysecretvalue1234567890";
+    const cfg: ResolvedWeavePluginConfig = {
+      ...baseCfg,
+      captureContent: {
+        enabled: true,
+        inputMessages: true,
+        outputMessages: true,
+        toolArguments: false,
+        toolResults: false,
+        systemInstructions: false,
+      },
+    };
+    const event = {
+      type: "model.call.completed",
+      ts: 2000,
+      seq: 5,
+      runId: "r-1",
+      callId: "c-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      durationMs: 200,
+      inputMessages: [{ role: "user", content: REDACTABLE }],
+      outputMessages: [{ role: "assistant", content: REDACTABLE }],
+      trace: trace(CHILD_SPAN_ID),
+    } as unknown as DiagnosticEventPayload;
+    const r = mapDiagnosticEventToWeaveSpan(event, cfg);
+    if (r.kind !== "finalize") throw new Error("expected finalize");
+    expect(r.attrs["weave.redactions.count"]).toBe(2);
+  });
+
+  test("weave.redactions.count is absent when no leaves matched a redaction pattern", () => {
+    const cfg: ResolvedWeavePluginConfig = {
+      ...baseCfg,
+      captureContent: {
+        enabled: true,
+        inputMessages: true,
+        outputMessages: true,
+        toolArguments: false,
+        toolResults: false,
+        systemInstructions: false,
+      },
+    };
+    const event = {
+      type: "model.call.completed",
+      ts: 2000,
+      seq: 5,
+      runId: "r-1",
+      callId: "c-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      durationMs: 200,
+      inputMessages: [{ role: "user", content: "harmless prompt" }],
+      outputMessages: [{ role: "assistant", content: "harmless reply" }],
+      trace: trace(CHILD_SPAN_ID),
+    } as unknown as DiagnosticEventPayload;
+    const r = mapDiagnosticEventToWeaveSpan(event, cfg);
+    if (r.kind !== "finalize") throw new Error("expected finalize");
+    expect(r.attrs["weave.redactions.count"]).toBeUndefined();
+  });
+
   test("captureContent on emits weave.input.messages and weave.output.messages", () => {
     const cfg: ResolvedWeavePluginConfig = {
       ...baseCfg,

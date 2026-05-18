@@ -57,16 +57,7 @@ const ROOT_STRING_FRAME_BUDGET = 2 + 24;
  * - returns undefined for empty strings (so callers can skip attribute set)
  */
 export function sanitizeAttrString(value: unknown): string | undefined {
-  if (typeof value !== "string") {
-    return undefined;
-  }
-  const redacted = redactSensitiveText(value);
-  if (redacted.length === 0) {
-    return undefined;
-  }
-  return redacted.length > MAX_ATTRIBUTE_CHARS
-    ? `${redacted.slice(0, MAX_ATTRIBUTE_CHARS)}…[truncated ${redacted.length - MAX_ATTRIBUTE_CHARS}c]`
-    : redacted;
+  return sanitizeAttrStringWithFlag(value)?.value;
 }
 
 /**
@@ -86,13 +77,23 @@ export function sanitizeAttrJson(value: unknown): string | undefined {
 }
 
 /**
- * Same as `sanitizeAttrString`, but returns a flag indicating whether the
- * `MAX_ATTRIBUTE_CHARS` clamp triggered. Used by callers that want to emit
- * a sibling `*._truncated: true` attribute so dashboards can filter for
- * truncated traces without string-matching the inline `…[truncated Nc]`
- * marker.
+ * Same as `sanitizeAttrString`, but returns flags indicating whether the
+ * `MAX_ATTRIBUTE_CHARS` clamp triggered and how many string leaves were
+ * altered by redaction.
+ *
+ * `truncated` lets callers emit a sibling `*_truncated: true` attribute so
+ * dashboards can filter for truncated traces without string-matching the
+ * inline `…[truncated Nc]` marker. `redactions` counts the leaves whose text
+ * changed under `redactSensitiveText` (0 or 1 for the string variant, ≥0 for
+ * the JSON variant since each tree leaf is counted independently). Callers
+ * aggregate per-phase and emit `weave.redactions.count` so operators can spot
+ * spans where pattern-based redaction nuked something visible.
  */
-export type SanitizedWithFlag = { value: string; truncated: boolean };
+export type SanitizedWithFlag = {
+  value: string;
+  truncated: boolean;
+  redactions: number;
+};
 
 export function sanitizeAttrStringWithFlag(
   value: unknown,
@@ -100,20 +101,23 @@ export function sanitizeAttrStringWithFlag(
   if (typeof value !== "string") return undefined;
   const redacted = redactSensitiveText(value);
   if (redacted.length === 0) return undefined;
+  const redactions = redacted !== value ? 1 : 0;
   if (redacted.length > MAX_ATTRIBUTE_CHARS) {
     return {
       value: `${redacted.slice(0, MAX_ATTRIBUTE_CHARS)}…[truncated ${redacted.length - MAX_ATTRIBUTE_CHARS}c]`,
       truncated: true,
+      redactions,
     };
   }
-  return { value: redacted, truncated: false };
+  return { value: redacted, truncated: false, redactions };
 }
 
 export function sanitizeAttrJsonWithFlag(
   value: unknown,
 ): SanitizedWithFlag | undefined {
   if (value === undefined || value === null) return undefined;
-  const sanitized = walk(value, 0);
+  const accum: WalkAccum = { redactions: 0 };
+  const sanitized = walk(value, 0, accum);
   if (sanitized === undefined) return undefined;
   let serialized: string;
   try {
@@ -123,7 +127,7 @@ export function sanitizeAttrJsonWithFlag(
   }
   if (serialized.length === 0) return undefined;
   if (serialized.length <= MAX_ATTRIBUTE_CHARS) {
-    return { value: serialized, truncated: false };
+    return { value: serialized, truncated: false, redactions: accum.redactions };
   }
   // Over budget. Structurally truncate so the result remains valid JSON.
   // Why this matters: the Weave trace server's `_normalize_raw_messages`
@@ -141,7 +145,7 @@ export function sanitizeAttrJsonWithFlag(
   } catch {
     return undefined;
   }
-  return { value: result, truncated: true };
+  return { value: result, truncated: true, redactions: accum.redactions };
 }
 
 /**
@@ -296,7 +300,9 @@ function findLongestStringRef(
   return best;
 }
 
-function walk(value: unknown, depth: number): unknown {
+type WalkAccum = { redactions: number };
+
+function walk(value: unknown, depth: number, accum: WalkAccum): unknown {
   if (depth > 6) {
     return "[depth-limit]";
   }
@@ -304,7 +310,9 @@ function walk(value: unknown, depth: number): unknown {
     return value;
   }
   if (typeof value === "string") {
-    return redactSensitiveText(value);
+    const redacted = redactSensitiveText(value);
+    if (redacted !== value) accum.redactions += 1;
+    return redacted;
   }
   if (typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -316,7 +324,7 @@ function walk(value: unknown, depth: number): unknown {
     // it whenever history exceeds the cap. Marker is prepended so the
     // server-side `_normalize_raw_messages` shows it before the older
     // surviving items, not after the latest one.
-    const tail = value.slice(-MAX_ARRAY_ITEMS).map((v) => walk(v, depth + 1));
+    const tail = value.slice(-MAX_ARRAY_ITEMS).map((v) => walk(v, depth + 1, accum));
     if (value.length > MAX_ARRAY_ITEMS) {
       tail.unshift(`…[${value.length - MAX_ARRAY_ITEMS} more]`);
     }
@@ -325,7 +333,7 @@ function walk(value: unknown, depth: number): unknown {
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-      out[k] = walk(v, depth + 1);
+      out[k] = walk(v, depth + 1, accum);
     }
     return out;
   }

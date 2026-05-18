@@ -33,7 +33,7 @@ import { createExporterObserver, type ExporterStats } from "./exporter-observer.
 import type { WeaveHookState } from "./hook-state.js";
 import { InvokeAgentIndex } from "./invoke-agent-index.js";
 import { PendingTraceState } from "./pending-trace-state.js";
-import { sanitizeAttrString } from "./redact.js";
+import { sanitizeAttrStringWithFlag } from "./redact.js";
 import { resolveWandbApiKey } from "./resolve-auth.js";
 import { resolveWeaveAppUrl, resolveWeaveEndpoint } from "./resolve-endpoint.js";
 import { SpanRegistry, type DebugLogger } from "./span-registry.js";
@@ -339,6 +339,14 @@ export function createWeaveService(
   let debugTraceTree = false;
   /** Wired into SpanRegistry; logs span-create / orphan-drop / trace-tree. */
   let debugLogger: DebugLogger | undefined;
+  /**
+   * Set at start() time. handleEvent calls this after every mapper result so
+   * `*_truncated: true` attrs surface as rate-limited warnings instead of
+   * silently riding the span. Undefined when the service isn't started.
+   */
+  let noteTruncationsInAttrs:
+    | ((attrs: Record<string, string | number | boolean>) => void)
+    | undefined;
 
   /**
    * Lifecycle state for `/weave status`. Distinct from `stopped` because the
@@ -391,24 +399,44 @@ export function createWeaveService(
       if (raw.enabled === false) {
         lifecycle = "disabled";
         lifecycleDetail = "config.enabled=false";
-        ctx.logger.info("weave: disabled via config.enabled=false");
-        return;
-      }
-      if (typeof raw.entity !== "string" || raw.entity.length === 0) {
-        lifecycle = "config-error";
-        lifecycleDetail = "config.entity is required";
-        ctx.logger.error(
-          `weave: config.entity is required. Set plugins.entries.weave.config.entity in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B team or username slug, e.g. \`config: { entity: "your-team", project: "your-project" }\`.`,
+        // `warn` (not `info`) so operators tailing gateway logs notice the
+        // plugin is intentionally inert. The plugin is loaded (bytes shipped,
+        // schema validated) but won't emit a single span until enabled flips.
+        ctx.logger.warn(
+          "weave: configured but disabled (config.enabled=false). Set config.enabled=true to start exporting to W&B Weave.",
         );
         return;
       }
-      if (typeof raw.project !== "string" || raw.project.length === 0) {
-        lifecycle = "config-error";
-        lifecycleDetail = "config.project is required";
-        ctx.logger.error(
-          `weave: config.project is required. Set plugins.entries.weave.config.project in your OpenClaw gateway config (default ~/.openclaw/openclaw.json) to your W&B project name, e.g. \`config: { entity: "${raw.entity}", project: "your-project" }\`.`,
+
+      // Dev/onboarding ergonomics: if entity/project are omitted, default to
+      // `$USER` and `openclaw-default` so `pnpm install && start gateway` just
+      // works. Logged at warn level so operators see exactly what defaulted
+      // and how to override for production.
+      let entity = nonEmptyString(raw.entity);
+      let project = nonEmptyString(raw.project);
+      const defaultsApplied: string[] = [];
+      if (!entity) {
+        const inferred =
+          nonEmptyString(process.env.USER) ?? nonEmptyString(process.env.USERNAME);
+        if (!inferred) {
+          lifecycle = "config-error";
+          lifecycleDetail = "config.entity is required";
+          ctx.logger.error(
+            "weave: config.entity is required and could not be defaulted ($USER/$USERNAME env unset). Set plugins.entries.weave.config.entity in your OpenClaw gateway config to your W&B team or username slug.",
+          );
+          return;
+        }
+        entity = inferred;
+        defaultsApplied.push(`entity=${entity} (from $USER)`);
+      }
+      if (!project) {
+        project = "openclaw-default";
+        defaultsApplied.push(`project=${project}`);
+      }
+      if (defaultsApplied.length > 0) {
+        ctx.logger.warn(
+          `weave: applied dev defaults [${defaultsApplied.join(", ")}]. For production set plugins.entries.weave.config.{entity,project} to point to a real W&B project.`,
         );
-        return;
       }
 
       let endpoint: string;
@@ -426,7 +454,7 @@ export function createWeaveService(
           authSource = auth.source;
           const realExporter = new OTLPTraceExporter({
             url: endpoint,
-            headers: buildExporterHeaders(auth.key, `${raw.entity}/${raw.project}`),
+            headers: buildExporterHeaders(auth.key, `${entity}/${project}`),
           });
           const observed = createExporterObserver(realExporter, {
             onWarn: (msg) => ctx.logger.warn(msg),
@@ -444,7 +472,7 @@ export function createWeaveService(
 
       const flushInterval = clampFlushInterval(raw.flushIntervalMs);
       const serviceName = raw.serviceName?.trim() || DEFAULT_SERVICE_NAME;
-      const projectId = `${raw.entity}/${raw.project}`;
+      const projectId = `${entity}/${project}`;
 
       const spanProcessor: SpanProcessor = new BatchSpanProcessor(exporter, {
         scheduledDelayMillis: flushInterval,
@@ -458,8 +486,8 @@ export function createWeaveService(
           // ingest as an alternate routing path alongside the project_id
           // header — belt-and-suspenders for stripped headers and gives every
           // span queryable provenance.
-          "wandb.entity": raw.entity,
-          "wandb.project": raw.project,
+          "wandb.entity": entity,
+          "wandb.project": project,
         }),
         spanProcessors: [spanProcessor],
       });
@@ -473,8 +501,8 @@ export function createWeaveService(
 
       const resolvedAgentVersion = resolveAgentVersion(raw.agentVersion);
       resolvedCfg = {
-        entity: raw.entity,
-        project: raw.project,
+        entity,
+        project,
         endpoint,
         serviceName,
         agentName: raw.agentName,
@@ -513,6 +541,42 @@ export function createWeaveService(
           return;
         }
         b.suppressed += 1;
+      };
+
+      // Per-attribute-key rate limiter for `*_truncated: true` sightings.
+      // Without this, operators see the boolean on the span but never the
+      // operational fact ("10% of your traces are getting clamped, raise the
+      // limit"). Mirrors `handlerErrorBuckets`: first hit per attr per 60s
+      // window logs at warn; subsequent hits increment a suppressed counter;
+      // the next window-flip reports the count alongside the new occurrence.
+      const truncationBuckets = new Map<
+        string,
+        { windowStart: number; suppressed: number }
+      >();
+      const reportTruncation = (attrKey: string): void => {
+        const t = Date.now();
+        const b = truncationBuckets.get(attrKey);
+        if (!b || t - b.windowStart > 60_000) {
+          if (b && b.suppressed > 0) {
+            ctx.logger.warn(
+              `weave: ${b.suppressed} additional truncations of ${attrKey} suppressed in last window; payload still exceeds 256KiB attribute budget`,
+            );
+          } else {
+            ctx.logger.warn(
+              `weave: ${attrKey} exceeded 256KiB attribute budget; payload was structurally truncated`,
+            );
+          }
+          truncationBuckets.set(attrKey, { windowStart: t, suppressed: 0 });
+          return;
+        }
+        b.suppressed += 1;
+      };
+      noteTruncationsInAttrs = (attrs) => {
+        for (const [k, v] of Object.entries(attrs)) {
+          if (v === true && k.endsWith("_truncated")) {
+            reportTruncation(k.slice(0, -"_truncated".length));
+          }
+        }
       };
 
       // We use onInternalDiagnosticEvent (not onDiagnosticEvent) because the
@@ -683,8 +747,13 @@ export function createWeaveService(
       attrs["weave.agent.error"] = p.error;
     }
     if (resolvedCfg.captureContent.enabled && p.lastAssistantMessage) {
-      const sanitized = sanitizeAttrString(p.lastAssistantMessage);
-      if (sanitized) attrs["weave.agent.final_message"] = sanitized;
+      const sanitized = sanitizeAttrStringWithFlag(p.lastAssistantMessage);
+      if (sanitized) {
+        attrs["weave.agent.final_message"] = sanitized.value;
+        if (sanitized.redactions > 0) {
+          attrs["weave.redactions.count"] = sanitized.redactions;
+        }
+      }
     }
     span.addEvent("agent_end_summary", attrs);
   }
@@ -708,8 +777,13 @@ export function createWeaveService(
     };
     if (p.channel) attrs["weave.message.channel"] = p.channel;
     if (resolvedCfg.captureContent.enabled && p.content) {
-      const sanitized = sanitizeAttrString(p.content);
-      if (sanitized) attrs["weave.message.content"] = sanitized;
+      const sanitized = sanitizeAttrStringWithFlag(p.content);
+      if (sanitized) {
+        attrs["weave.message.content"] = sanitized.value;
+        if (sanitized.redactions > 0) {
+          attrs["weave.redactions.count"] = sanitized.redactions;
+        }
+      }
     }
     span.addEvent("message_received", attrs);
   }
@@ -841,6 +915,8 @@ export function createWeaveService(
       conversationIdHint,
     });
     if (result.kind === "skip") return;
+
+    noteTruncationsInAttrs?.(result.attrs);
 
     if (result.kind === "start") {
       const isInvokeAgent = result.spanName.startsWith("invoke_agent ");
@@ -1173,6 +1249,7 @@ export function createWeaveService(
     invokeAgents = undefined;
     pending = undefined;
     debugLogger = undefined;
+    noteTruncationsInAttrs = undefined;
   }
 }
 

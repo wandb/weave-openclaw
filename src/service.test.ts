@@ -352,14 +352,79 @@ describe("createWeaveService (integration)", () => {
     );
   });
 
-  test("missing required config logs error and does not throw", async () => {
+  test("missing entity defaults from $USER and logs dev-defaults warning", async () => {
+    // $USER is set in the test environment (vitest inherits the shell env);
+    // the default path infers entity from it rather than erroring.
     const { service } = createWeaveService({
       pluginConfig: { project: "agents" }, // missing entity
       spanExporter: exporter,
     });
     const ctx = makeCtx();
     await service.start(ctx); // must not throw
-    expect((ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls.length).toBeGreaterThan(0);
+    const warns = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(warns).toMatch(/applied dev defaults/);
+    expect(warns).toMatch(/entity=.*\(from \$USER\)/);
+    expect((ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    await service.stop?.(ctx);
+  });
+
+  test("missing entity AND unset $USER logs error and does not start", async () => {
+    const origUser = process.env.USER;
+    const origUsername = process.env.USERNAME;
+    delete process.env.USER;
+    delete process.env.USERNAME;
+    try {
+      const { service } = createWeaveService({
+        pluginConfig: { project: "agents" }, // missing entity, no env to default from
+        spanExporter: exporter,
+      });
+      const ctx = makeCtx();
+      await service.start(ctx);
+      const errs = (ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls
+        .map((c) => String(c[0]))
+        .join("\n");
+      expect(errs).toMatch(/config.entity is required.*\$USER.*unset/);
+      await service.stop?.(ctx);
+    } finally {
+      if (origUser !== undefined) process.env.USER = origUser;
+      if (origUsername !== undefined) process.env.USERNAME = origUsername;
+    }
+  });
+
+  test("missing project defaults to openclaw-default with warning", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme" }, // missing project
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+    const warns = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(warns).toMatch(/project=openclaw-default/);
+    expect((ctx.logger.error as ReturnType<typeof vi.fn>).mock.calls.length).toBe(0);
+    await service.stop?.(ctx);
+  });
+
+  test("enabled: false logs a warn (operator-visible) instead of info", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { enabled: false, entity: "acme", project: "agents" },
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+    const warns = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(warns).toMatch(/configured but disabled/);
+    expect(warns).toMatch(/config.enabled=false/);
+    // ensure the old info-level log is gone
+    const infos = (ctx.logger.info as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(infos).not.toMatch(/disabled via config/);
     await service.stop?.(ctx);
   });
 
@@ -1309,5 +1374,42 @@ describe("createWeaveService (integration)", () => {
     expect(joined).toContain("emitGenAiAliases=true");
     expect(joined).toContain("stripSenderWrapper=false");
     await service.stop?.(ctx);
+  });
+
+  test("`*_truncated` attrs emit a rate-limited warn so operators see the budget exceeded", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+      spanExporter: exporter,
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-trunc",
+      harnessId: "x",
+      sessionKey: "conv-trunc",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    // 400 KiB > 256 KiB MAX_ATTRIBUTE_CHARS forces structural truncation
+    // inside sanitizeAttrJsonWithFlag, which sets weave.input.messages_truncated=true.
+    const huge = "x".repeat(400_000);
+    emitTrustedDiagnosticEvent({
+      type: "model.call.completed",
+      runId: "r-trunc",
+      callId: "c-trunc",
+      provider: "openai",
+      model: "gpt-5.4",
+      durationMs: 100,
+      inputMessages: [{ role: "user", content: huge }],
+      trace: trace(CHAT_SPAN_ID, ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const warns = (ctx.logger.warn as ReturnType<typeof vi.fn>).mock.calls
+      .map((c) => String(c[0]))
+      .join("\n");
+    expect(warns).toMatch(/weave\.input\.messages exceeded 256KiB attribute budget/);
   });
 });

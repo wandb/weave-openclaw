@@ -239,3 +239,45 @@ describe("shrinkJsonValueToFit (internal helper) terminates and produces valid J
     expect(JSON.stringify(out).length).toBeLessThanOrEqual(8 * 1024);
   });
 });
+
+describe("redactions count surfaces in SanitizedWithFlag", () => {
+  // Default OpenClaw redact patterns match e.g. SECRET_KEY=<token> with token
+  // ≥ 18 chars (DEFAULT_REDACT_MIN_LENGTH). Use that shape to deterministically
+  // trigger redaction in tests.
+  const REDACTABLE = "SECRET_KEY=mysecretvalue1234567890";
+
+  it("sanitizeAttrStringWithFlag reports redactions=0 when nothing matched", () => {
+    const r = sanitizeAttrStringWithFlag("plain harmless text");
+    expect(r).toBeDefined();
+    expect(r!.redactions).toBe(0);
+  });
+
+  it("sanitizeAttrStringWithFlag reports redactions=1 when redaction fired", () => {
+    const r = sanitizeAttrStringWithFlag(REDACTABLE);
+    expect(r).toBeDefined();
+    expect(r!.redactions).toBe(1);
+    // Output should NOT be the literal input (it's masked).
+    expect(r!.value).not.toBe(REDACTABLE);
+  });
+
+  it("sanitizeAttrJsonWithFlag counts redactions per leaf", () => {
+    const messages = [
+      { role: "user", content: "no secrets here" },
+      { role: "assistant", content: REDACTABLE },
+      { role: "user", content: REDACTABLE },
+    ];
+    const r = sanitizeAttrJsonWithFlag(messages);
+    expect(r).toBeDefined();
+    expect(r!.redactions).toBe(2);
+  });
+
+  it("sanitizeAttrJsonWithFlag reports redactions=0 for clean input", () => {
+    const messages = [
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "world" },
+    ];
+    const r = sanitizeAttrJsonWithFlag(messages);
+    expect(r).toBeDefined();
+    expect(r!.redactions).toBe(0);
+  });
+});
