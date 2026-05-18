@@ -35,7 +35,7 @@ import { InvokeAgentIndex } from "./invoke-agent-index.js";
 import { PendingTraceState } from "./pending-trace-state.js";
 import { sanitizeAttrString } from "./redact.js";
 import { resolveWandbApiKey } from "./resolve-auth.js";
-import { resolveWeaveEndpoint } from "./resolve-endpoint.js";
+import { resolveWeaveAppUrl, resolveWeaveEndpoint } from "./resolve-endpoint.js";
 import { SpanRegistry, type DebugLogger } from "./span-registry.js";
 import {
   resolveContentCapture,
@@ -444,6 +444,7 @@ export function createWeaveService(
             ? "full"
             : captureFields.join(",");
       ctx.logger.info(`weave: exporting to ${endpoint}`);
+      ctx.logger.info(`weave: dashboard ${resolveWeaveAppUrl(raw)}/${projectId}/weave`);
       ctx.logger.info(
         `weave: project=${projectId} service=${serviceName} agentVersion=${resolvedAgentVersion} ` +
           `auth=${authSource} flushIntervalMs=${flushInterval} ` +

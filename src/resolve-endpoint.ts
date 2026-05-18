@@ -32,6 +32,24 @@ export function resolveWeaveEndpoint(cfg: RawWeavePluginConfig): string {
   return `${resolveTraceServerUrl(cfg)}${AGENTS_TRACES_PATH}`;
 }
 
+/**
+ * Resolve the W&B app (UI) base URL — the host operators open in a browser to
+ * view traces. Derived from `wandbBaseUrl` by stripping a leading `api.`
+ * subdomain (cloud convention: api at `api.wandb.ai`, UI at `wandb.ai`).
+ * Dedicated installs without an `api.` prefix are returned as-is.
+ *
+ * `wfTraceServerUrl` intentionally does NOT influence this — it's an ingest
+ * override (e.g. a proxy) and tells us nothing about where the UI lives.
+ */
+export function resolveWeaveAppUrl(cfg: RawWeavePluginConfig): string {
+  const baseRaw =
+    nonEmpty(cfg.wandbBaseUrl) ??
+    nonEmpty(process.env.WANDB_BASE_URL) ??
+    DEFAULT_WANDB_BASE_URL;
+  const base = normalizeAndValidateUrl(baseRaw, "wandbBaseUrl");
+  return base.replace(/^(https?:\/\/)api\./i, "$1");
+}
+
 function resolveTraceServerUrl(cfg: RawWeavePluginConfig): string {
   const wfOverride =
     nonEmpty(cfg.wfTraceServerUrl) ?? nonEmpty(process.env.WF_TRACE_SERVER_URL);

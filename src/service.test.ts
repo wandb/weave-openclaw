@@ -1303,6 +1303,7 @@ describe("createWeaveService (integration)", () => {
     const joined = info.mock.calls.map((c) => String(c[0])).join("\n");
     expect(joined).toContain("auth=");
     expect(joined).toContain("exporting to https://trace.wandb.ai/agents/otel/v1/traces");
+    expect(joined).toContain("dashboard https://wandb.ai/e/p/weave");
     expect(joined).toContain("flushIntervalMs=5000");
     expect(joined).toContain("captureContent=full");
     expect(joined).toContain("emitGenAiAliases=true");

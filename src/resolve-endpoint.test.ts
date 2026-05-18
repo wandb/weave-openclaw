@@ -3,7 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
-import { resolveWeaveEndpoint } from "./resolve-endpoint.js";
+import { resolveWeaveAppUrl, resolveWeaveEndpoint } from "./resolve-endpoint.js";
 
 describe("resolveWeaveEndpoint", () => {
   const prevBaseUrl = process.env.WANDB_BASE_URL;
@@ -143,5 +143,91 @@ describe("resolveWeaveEndpoint", () => {
         wfTraceServerUrl: "http://localhost:8080/wf",
       }),
     ).toBe("http://localhost:8080/wf/agents/otel/v1/traces");
+  });
+});
+
+describe("resolveWeaveAppUrl", () => {
+  const prevBaseUrl = process.env.WANDB_BASE_URL;
+
+  beforeEach(() => {
+    delete process.env.WANDB_BASE_URL;
+  });
+
+  afterEach(() => {
+    if (prevBaseUrl !== undefined) process.env.WANDB_BASE_URL = prevBaseUrl;
+    else delete process.env.WANDB_BASE_URL;
+  });
+
+  test("default (no config, no env) returns cloud app URL", () => {
+    expect(resolveWeaveAppUrl({ entity: "x", project: "y" })).toBe(
+      "https://wandb.ai",
+    );
+  });
+
+  test("explicit cloud wandbBaseUrl strips api. subdomain", () => {
+    expect(
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wandbBaseUrl: "https://api.wandb.ai",
+      }),
+    ).toBe("https://wandb.ai");
+  });
+
+  test("dedicated wandbBaseUrl without api. prefix is preserved", () => {
+    expect(
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wandbBaseUrl: "https://acme.wandb.io",
+      }),
+    ).toBe("https://acme.wandb.io");
+  });
+
+  test("trailing slashes on wandbBaseUrl are stripped", () => {
+    expect(
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wandbBaseUrl: "https://acme.wandb.io///",
+      }),
+    ).toBe("https://acme.wandb.io");
+  });
+
+  test("WANDB_BASE_URL env var is used when config field omitted", () => {
+    process.env.WANDB_BASE_URL = "https://api.wandb.test";
+    expect(resolveWeaveAppUrl({ entity: "x", project: "y" })).toBe(
+      "https://wandb.test",
+    );
+  });
+
+  test("wfTraceServerUrl does NOT influence app URL", () => {
+    expect(
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wfTraceServerUrl: "https://proxy.example.com/wf",
+      }),
+    ).toBe("https://wandb.ai");
+  });
+
+  test("http:// (dev install) preserved", () => {
+    expect(
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wandbBaseUrl: "http://localhost:8080",
+      }),
+    ).toBe("http://localhost:8080");
+  });
+
+  test("wandbBaseUrl without protocol throws", () => {
+    expect(() =>
+      resolveWeaveAppUrl({
+        entity: "x",
+        project: "y",
+        wandbBaseUrl: "wandb.ai",
+      }),
+    ).toThrowError(/must start with http/);
   });
 });
