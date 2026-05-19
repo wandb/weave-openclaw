@@ -24,12 +24,40 @@
         "type": "string",
         "description": "W&B project name.",
         "minLength": 1
+      },
+      "wandbApiKey": {
+        "description": "W&B API key. String literal (discouraged), { secretRef: { source, provider, id } } shape, or omit to read WANDB_API_KEY from env.",
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "provider", "id"],
+            "properties": {
+              "source": { "type": "string", "enum": ["env", "file", "exec"] },
+              "provider": { "type": "string", "minLength": 1 },
+              "id": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      },
+      "wandbBaseUrl": {
+        "type": "string",
+        "description": "W&B install base URL — matches the Weave Python SDK's WANDB_BASE_URL env var. Default https://api.wandb.ai (cloud). For a dedicated install use your install hostname, e.g. https://acme.wandb.io. The plugin derives the trace-server URL per the Weave SDK rule (cloud -> https://trace.wandb.ai; dedicated -> <base>/traces) and appends /agents/otel/v1/traces. Falls back to WANDB_BASE_URL env var when omitted."
+      },
+      "wfTraceServerUrl": {
+        "type": "string",
+        "description": "Full trace-server URL override — matches the Weave Python SDK's WF_TRACE_SERVER_URL env var. Bypasses wandbBaseUrl derivation; plugin appends /agents/otel/v1/traces. Use for self-managed installs or proxy routing. Falls back to WF_TRACE_SERVER_URL env var when omitted."
       }
     }
   },
   "uiHints": {
     "enabled": { "label": "Enable Weave export" },
     "entity": { "label": "W&B Entity (team/user)" },
-    "project": { "label": "W&B Project" }
+    "project": { "label": "W&B Project" },
+    "wandbBaseUrl": {
+      "label": "W&B Base URL",
+      "help": "Default https://api.wandb.ai. For dedicated set to your install host, e.g. https://acme.wandb.io."
+    }
   }
 }
