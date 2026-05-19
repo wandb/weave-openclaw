@@ -48,6 +48,28 @@
       "wfTraceServerUrl": {
         "type": "string",
         "description": "Full trace-server URL override — matches the Weave Python SDK's WF_TRACE_SERVER_URL env var. Bypasses wandbBaseUrl derivation; plugin appends /agents/otel/v1/traces. Use for self-managed installs or proxy routing. Falls back to WF_TRACE_SERVER_URL env var when omitted."
+      },
+      "serviceName": {
+        "type": "string",
+        "default": "openclaw-agent",
+        "description": "OTel Resource service.name attribute."
+      },
+      "agentName": {
+        "type": "string",
+        "description": "Override for weave.agent.name. Falls back to harnessId/pluginId from events."
+      },
+      "agentVersion": {
+        "type": "string",
+        "description": "weave.agent.version attribute. Set 'auto' to generate <pkgVersion>+<startupTimestamp> on every gateway restart so each plugin build/restart is a distinct version row in the Agents tab. Leave unset to use the plugin package version. Set an explicit string (e.g. 'v0.1') to pin."
+      },
+      "agentDescription": {
+        "type": "string",
+        "description": "weave.agent.description attribute."
+      },
+      "flushIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "default": 5000
       }
     }
   },
