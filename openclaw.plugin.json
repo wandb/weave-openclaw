@@ -1,0 +1,35 @@
+{
+  "id": "weave",
+  "name": "W&B Weave",
+  "version": "0.0.1",
+  "description": "Emit OpenClaw agent diagnostic events as OpenTelemetry spans to W&B Weave's Agents OTel endpoint (weave.* attributes, /agents/otel/v1/traces).",
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["entity", "project"],
+    "properties": {
+      "enabled": {
+        "type": "boolean",
+        "default": true
+      },
+      "entity": {
+        "type": "string",
+        "description": "W&B team or username slug.",
+        "minLength": 1
+      },
+      "project": {
+        "type": "string",
+        "description": "W&B project name.",
+        "minLength": 1
+      }
+    }
+  },
+  "uiHints": {
+    "enabled": { "label": "Enable Weave export" },
+    "entity": { "label": "W&B Entity (team/user)" },
+    "project": { "label": "W&B Project" }
+  }
+}
