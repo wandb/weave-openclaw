@@ -1405,4 +1405,102 @@ describe("createWeaveService (integration)", () => {
       .join("\n");
     expect(warns).toMatch(/weave\.input\.messages exceeded 256KiB attribute budget/);
   });
+
+  test("harness.run.error stamps an error span event on the active invoke_agent (by runId)", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-1",
+      harnessId: "x",
+      sessionKey: "conv-hre",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "harness.run.error",
+      runId: "r-1",
+      harnessId: "x",
+      durationMs: 250,
+      phase: "send",
+      errorCategory: "ProviderTimeout",
+      cleanupFailed: true,
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    // harness.run.error is async-dispatched by the SDK; drain before run.completed
+    // closes the invoke_agent span and evicts it from invokeAgents.
+    await flushAsyncDiagnostics();
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-1",
+      harnessId: "x",
+      durationMs: 250,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    expect(invoke).toBeDefined();
+    const ev = invoke?.events.find((e) => e.name === "harness.run.error");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.harness.phase"]).toBe("send");
+    expect(ev?.attributes?.["error.type"]).toBe("ProviderTimeout");
+    expect(ev?.attributes?.["weave.harness.duration_ms"]).toBe(250);
+    expect(ev?.attributes?.["weave.harness.cleanup_failed"]).toBe(true);
+  });
+
+  test("message.delivery.error stamps an error span event on the active invoke_agent (by sessionKey)", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-2",
+      harnessId: "x",
+      sessionKey: "conv-mde",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "message.delivery.error",
+      sessionKey: "conv-mde",
+      channel: "slack",
+      deliveryKind: "reply",
+      durationMs: 80,
+      errorCategory: "TransportTimeout",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    // message.delivery.error is async-dispatched; drain before run.completed.
+    await flushAsyncDiagnostics();
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-2",
+      harnessId: "x",
+      durationMs: 90,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    expect(invoke).toBeDefined();
+    const ev = invoke?.events.find((e) => e.name === "message.delivery.error");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.message.channel"]).toBe("slack");
+    expect(ev?.attributes?.["weave.message.delivery_kind"]).toBe("reply");
+    expect(ev?.attributes?.["weave.message.duration_ms"]).toBe(80);
+    expect(ev?.attributes?.["error.type"]).toBe("TransportTimeout");
+  });
 });

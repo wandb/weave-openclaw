@@ -851,6 +851,14 @@ export function createWeaveService(
       handleRunAttempt(e);
       return;
     }
+    if (event.type === "harness.run.error") {
+      handleHarnessRunError(e);
+      return;
+    }
+    if (event.type === "message.delivery.error") {
+      handleMessageDeliveryError(e);
+      return;
+    }
 
     const conversationIdHint = invokeAgents.sessionKeyForTrace(traceId);
 
@@ -1155,6 +1163,62 @@ export function createWeaveService(
       return;
     }
     pending.bufferToolLoop(traceId, { name: "tool.loop", attrs });
+  }
+
+  /**
+   * `harness.run.error` fires at the v2 harness layer and is the canonical
+   * signal for an agent-attempt failure that's not a model.call.error (e.g. a
+   * provider-timeout in the `send` phase or a cleanup-phase crash). We stamp
+   * it as a span event on the active invoke_agent rather than try to finalize
+   * one — the harness layer's span is upstream of what this plugin observes,
+   * and the inner run.* span is closed separately by run.completed.
+   *
+   * Pre-`run.started` prepare-phase failures still have nowhere to land
+   * (there's no invoke_agent yet); those are dropped today, as documented
+   * in the README's "known limitations" section.
+   */
+  function handleHarnessRunError(e: Record<string, unknown>): void {
+    if (!invokeAgents) return;
+    const runId = nonEmptyString(e.runId);
+    const sessionKey = nonEmptyString(e.sessionKey);
+    let span: Span | undefined;
+    if (runId) span = invokeAgents.lookup({ by: "runId", value: runId });
+    if (!span && sessionKey) {
+      span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    }
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.phase === "string") attrs["weave.harness.phase"] = e.phase;
+    if (typeof e.errorCategory === "string") attrs["error.type"] = e.errorCategory;
+    if (typeof e.durationMs === "number" && Number.isFinite(e.durationMs)) {
+      attrs["weave.harness.duration_ms"] = Math.trunc(e.durationMs);
+    }
+    if (e.cleanupFailed === true) attrs["weave.harness.cleanup_failed"] = true;
+    span.addEvent("harness.run.error", attrs);
+  }
+
+  /**
+   * `message.delivery.error` fires when the outbound transport fails to deliver
+   * the agent's reply. Without this, traces look successful even when the user
+   * never received the reply. Looked up by sessionKey since the event doesn't
+   * carry runId.
+   */
+  function handleMessageDeliveryError(e: Record<string, unknown>): void {
+    if (!invokeAgents) return;
+    const sessionKey = nonEmptyString(e.sessionKey);
+    if (!sessionKey) return;
+    const span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.channel === "string") attrs["weave.message.channel"] = e.channel;
+    if (typeof e.deliveryKind === "string") {
+      attrs["weave.message.delivery_kind"] = e.deliveryKind;
+    }
+    if (typeof e.durationMs === "number" && Number.isFinite(e.durationMs)) {
+      attrs["weave.message.duration_ms"] = Math.trunc(e.durationMs);
+    }
+    if (typeof e.errorCategory === "string") attrs["error.type"] = e.errorCategory;
+    span.addEvent("message.delivery.error", attrs);
   }
 
   async function teardownInternal(): Promise<void> {
