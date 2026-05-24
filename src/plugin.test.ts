@@ -205,6 +205,29 @@ describe("turn lifecycle", () => {
     expect(turn?.status.code).toBe(2); // ERROR
   });
 
+  it("falls back to stableAgentId for agentName when config omits it", async () => {
+    const ctx = await bootPlugin();  // no explicit agentName
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r-anon",
+      sessionKey: "s-anon",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    ctx.dispatch.diagnostic({
+      type: "run.completed",
+      ts: 2000,
+      runId: "r-anon",
+      sessionKey: "s-anon",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await ctx.finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn?.attributes["gen_ai.agent.name"]).toBeDefined();
+    expect(turn?.attributes["gen_ai.agent.name"]).not.toBe("");
+  });
+
   it("opens a Session on session_start and ends on session_end", async () => {
     const { plugin, dispatch, finish } = await bootPlugin();
     dispatch.hook("session_start", { sessionKey: "s-1" });

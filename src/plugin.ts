@@ -3,6 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { flushOTel, init as weaveInit, runIsolated, startSession, startTurn } from "weave";
+import { stableAgentId } from "./agent-id.js";
 import type { Message, Usage } from "weave";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type { WeaveHookState } from "./hook-state.js";
@@ -103,6 +104,13 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       resolved = cfg;
       lifecycle = "running";
       startedAt = Date.now();
+      if (cfg.stripSenderWrapper) {
+        ctx.logger.warn(
+          "weave: config.stripSenderWrapper is set to true but is no longer honored in v2; " +
+            "raw 'Conversation info' / 'Sender' wrappers will appear in gen_ai.input.messages. " +
+            "Remove the field from your config to silence this warning.",
+        );
+      }
       ctx.logger.info(
         `weave: project=${cfg.projectId} service=${cfg.serviceName} agentVersion=${cfg.agentVersion} ` +
           `auth=${cfg.authSource ?? "WANDB_API_KEY env"} captureContent=${cfg.captureContent ? "on" : "off"}`,
@@ -144,7 +152,6 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         agentVersion: resolved.agentVersion,
         flushIntervalMs: resolved.flushIntervalMs,
         captureContent: resolved.captureContent,
-        stripSenderWrapper: resolved.stripSenderWrapper,
         authSource: resolved.authSource ?? "WANDB_API_KEY env",
         uiUrl,
       };
@@ -168,7 +175,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     const session = runIsolated(() =>
       startSession({
         sessionId: key,
-        agentName: resolved!.agentName,
+        agentName:
+          resolved!.agentName ?? stableAgentId(resolved!.entity, resolved!.project, undefined),
       }),
     );
     setBoundedMap(registries.sessions, key, session, MAX_ENTRIES);
@@ -357,6 +365,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     if (registries.turns.has(event.runId)) return;
     const sessionKey: string | undefined = event.sessionKey;
     const existingSession = sessionKey ? registries.sessions.get(sessionKey) : undefined;
+    const agentName =
+      resolved.agentName ?? stableAgentId(resolved.entity, resolved.project, undefined);
     const session =
       existingSession ??
       (sessionKey
@@ -364,7 +374,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
             const s = runIsolated(() =>
               startSession({
                 sessionId: sessionKey,
-                agentName: resolved!.agentName,
+                agentName,
               }),
             );
             setBoundedMap(registries.sessions, sessionKey, s, MAX_ENTRIES);
@@ -373,8 +383,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         : undefined);
     const turn = runIsolated(() =>
       session
-        ? session.startTurn({ agentName: resolved!.agentName, model: event.model })
-        : startTurn({ agentName: resolved!.agentName, model: event.model }),
+        ? session.startTurn({ agentName, model: event.model })
+        : startTurn({ agentName, model: event.model }),
     );
     if (resolved.agentVersion) turn.setAttribute("weave.agent.version", resolved.agentVersion);
     if (resolved.agentDescription) turn.setAttribute("weave.agent.description", resolved.agentDescription);

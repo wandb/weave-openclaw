@@ -13,7 +13,6 @@ export type StatusSnapshot = {
     agentVersion: string;
     flushIntervalMs: number;
     captureContent: boolean;
-    stripSenderWrapper: boolean;
     authSource: string;
     uiUrl?: string;
   };

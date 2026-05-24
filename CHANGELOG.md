@@ -9,6 +9,11 @@
   by the SDK.
 
 ### Removed
+- `config.stripSenderWrapper` is now a no-op. v1 stripped OpenClaw's
+  "Conversation info (untrusted metadata)" wrappers from prompt content
+  before stamping `gen_ai.input.messages`; v2 leaves them raw. Operators
+  who relied on this should remove the field; the plugin warns at start
+  if it's still set to true.
 - Redaction layer (`redact.ts`). Operators are expected to scrub content
   upstream if needed.
 - Per-attribute truncation flags. Raw content flows to the OTLP
