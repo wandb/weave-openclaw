@@ -45,6 +45,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let lifecycleDetail: string | undefined;
   let startedAt: number | undefined;
   const costByRun = new Map<string, number>();
+  const pendingCompactionByRun = new Map<string, { itemsBefore: number }>();
 
   const service: OpenClawPluginService = {
     id: "weave",
@@ -239,6 +240,68 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     }
   };
 
+  handlers.hook.subagent_spawned = (event, ctx) => {
+    if (!resolved) return;
+    const requesterRunId: string | undefined = ctx?.runId;
+    const turn = requesterRunId ? registries.turns.get(requesterRunId) : undefined;
+    if (!turn) return;
+    if (registries.subagents.has(event.runId)) return;
+    const sub = runIsolated(() =>
+      turn.startSubagent({ name: event.agentId }),
+    );
+    const evAttrs: Record<string, string | number | boolean> = {
+      "weave.agent.id": event.agentId,
+      "weave.subagent.mode": event.mode ?? "run",
+    };
+    if (event.label) evAttrs["weave.agent.description"] = event.label;
+    if (event.childSessionKey) evAttrs["gen_ai.conversation.id"] = event.childSessionKey;
+    turn.addEvent("subagent_spawned", evAttrs);
+    setBoundedMap(registries.subagents, event.runId, sub, MAX_ENTRIES);
+  };
+
+  handlers.hook.subagent_ended = (event) => {
+    const sub = registries.subagents.get(event.runId);
+    if (!sub) return;
+    const outcome = typeof event.outcome === "string" ? event.outcome : undefined;
+    if (outcome && outcome !== "ok") {
+      sub.end({ error: new Error(outcome) });
+    } else {
+      sub.end();
+    }
+    registries.subagents.delete(event.runId);
+  };
+
+  handlers.hook.before_compaction = (event, ctx) => {
+    const runId: string | undefined = ctx?.runId;
+    if (!runId) return;
+    pendingCompactionByRun.set(runId, {
+      itemsBefore: typeof event.messageCount === "number" ? event.messageCount : 0,
+    });
+  };
+
+  handlers.hook.after_compaction = (event, ctx) => {
+    const runId: string | undefined = ctx?.runId;
+    if (!runId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    const before = pendingCompactionByRun.get(runId);
+    pendingCompactionByRun.delete(runId);
+    const itemsBefore =
+      before?.itemsBefore ??
+      (typeof event.messageCount === "number" && typeof event.compactedCount === "number"
+        ? event.messageCount + event.compactedCount
+        : typeof event.messageCount === "number"
+          ? event.messageCount
+          : 0);
+    const itemsAfter = typeof event.messageCount === "number" ? event.messageCount : 0;
+    const tokens = typeof event.tokenCount === "number" ? event.tokenCount : 0;
+    turn.addEvent("context_compacted", {
+      items_before: itemsBefore,
+      items_after: itemsAfter,
+      tokens,
+    });
+  };
+
   handlers.hook.llm_input = (event) => {
     const capture = {
       systemPrompt: event.systemPrompt,
@@ -330,6 +393,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     }
     registries.turns.delete(event.runId);
     costByRun.delete(event.runId);
+    pendingCompactionByRun.delete(event.runId);
   }
 
   function onChatStart(event: any): void {

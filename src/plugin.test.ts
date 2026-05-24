@@ -701,3 +701,104 @@ describe("side-channel attrs on Turn", () => {
     expect(ev?.attributes?.["weave.agent.final_message"]).toBe("all done");
   });
 });
+
+describe("subagent and compaction", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin();
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  async function endRun(dispatch: any, finish: () => Promise<void>) {
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 9000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+  }
+
+  it("opens and closes a SubAgent under the requester's Turn", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", {
+      runId: "sub-r",
+      agentId: "researcher",
+      label: "search-agent",
+      childSessionKey: "sub-s",
+      mode: "run",
+    }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r", outcome: "ok" });
+    await endRun(dispatch, finish);
+    const sub = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.agent.name"] === "researcher");
+    expect(sub).toBeDefined();
+    // Verify the parent's subagent_spawned event carries the descriptive attrs.
+    // There are two invoke_agent spans: the subagent's own span and the parent
+    // turn. The parent is the one that has a subagent_spawned event on it.
+    const turn = exporter.getFinishedSpans().find(
+      s => s.name === "invoke_agent" && s.events.some(e => e.name === "subagent_spawned"),
+    );
+    const ev = turn?.events.find(e => e.name === "subagent_spawned");
+    expect(ev?.attributes?.["weave.agent.id"]).toBe("researcher");
+    expect(ev?.attributes?.["weave.subagent.mode"]).toBe("run");
+    expect(ev?.attributes?.["weave.agent.description"]).toBe("search-agent");
+    expect(ev?.attributes?.["gen_ai.conversation.id"]).toBe("sub-s");
+  });
+
+  it("marks subagent as error when outcome != ok", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", {
+      runId: "sub-r2",
+      agentId: "broken",
+      childSessionKey: "sub-s2",
+      mode: "run",
+    }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r2", outcome: "killed" });
+    await endRun(dispatch, finish);
+    const sub = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.agent.name"] === "broken");
+    expect(sub?.status.code).toBe(2); // ERROR
+  });
+
+  it("does not open a subagent when no requester turn exists", async () => {
+    const { plugin, dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", {
+      runId: "sub-orphan",
+      agentId: "orphan",
+      childSessionKey: "ck",
+      mode: "run",
+    }, { runId: "missing" });
+    expect(plugin.registries.subagents.has("sub-orphan")).toBe(false);
+    await endRun(dispatch, finish);
+  });
+
+  it("adds context_compacted as a span event on the Turn", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("before_compaction", { messageCount: 50, tokenCount: 100000, compactingCount: 40 }, { runId: "r" });
+    dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000 }, { runId: "r" });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "context_compacted");
+    expect(ev?.attributes?.["items_before"]).toBe(50);
+    expect(ev?.attributes?.["items_after"]).toBe(10);
+    expect(ev?.attributes?.["tokens"]).toBe(20000);
+  });
+
+  it("compaction without prior before_compaction infers items_before from messageCount + compactedCount", async () => {
+    const { dispatch, finish } = await setupTurn();
+    // No before_compaction; just after_compaction with messageCount + compactedCount.
+    dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000, compactedCount: 30 }, { runId: "r" });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "context_compacted");
+    expect(ev?.attributes?.["items_before"]).toBe(40);
+    expect(ev?.attributes?.["items_after"]).toBe(10);
+  });
+});
