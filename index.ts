@@ -112,6 +112,7 @@ export default definePluginEntry({
       endSubagentSpan,
       emitAgentEndSummary,
       emitMessageReceived,
+      emitMessageSent,
       emitSessionStart,
       emitSessionEnd,
       flushChatSpan,
@@ -180,6 +181,21 @@ export default definePluginEntry({
         from: event.from,
         channel,
         content: event.content,
+      });
+    });
+
+    // Outbound boundary: the agent's reply has been handed to the transport.
+    // Closes the loop with message_received so a trace shows both sides of
+    // the exchange. success=false means the transport failed to deliver —
+    // critical signal that's otherwise invisible.
+    api.on("message_sent", (event) => {
+      emitMessageSent({
+        runId: event.runId,
+        sessionKey: event.sessionKey,
+        to: event.to,
+        content: event.content,
+        success: event.success,
+        error: event.error,
       });
     });
 

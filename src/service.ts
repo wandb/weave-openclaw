@@ -127,6 +127,7 @@ export type WeaveServiceWithCallbacks = {
   endSubagentSpan: (params: SubagentSpanEndParams) => void;
   emitAgentEndSummary: (params: AgentEndSummaryParams) => void;
   emitMessageReceived: (params: MessageReceivedParams) => void;
+  emitMessageSent: (params: MessageSentParams) => void;
   emitSessionStart: (params: SessionStartParams) => void;
   emitSessionEnd: (params: SessionEndParams) => void;
   /**
@@ -224,6 +225,20 @@ export type MessageReceivedParams = {
   channel?: string;
   /** Truncated/masked content; only emitted when captureContent is enabled. */
   content?: string;
+};
+
+export type MessageSentParams = {
+  runId?: string;
+  sessionKey?: string;
+  /** Recipient identifier (channel-scoped). */
+  to: string;
+  /** Outbound channel name. Optional — not all transports populate it. */
+  channel?: string;
+  /** Outbound payload; only emitted when captureContent.outputMessages is on. */
+  content?: string;
+  success: boolean;
+  /** Transport error string when success=false. */
+  error?: string;
 };
 
 export type SessionStartParams = {
@@ -738,6 +753,41 @@ export function createWeaveService(
   }
 
   /**
+   * Outbound boundary: the agent's reply has been handed to the transport.
+   * Mirror of emitMessageReceived. Stamped on the active invoke_agent so a
+   * trace can be read as "user said X → agent did Y → agent replied Z" inline.
+   *
+   * `success=false` runs still close the invoke_agent normally; the error
+   * attribute lets Weave's chat view surface the delivery failure without
+   * marking the run as failed (the agent's logic completed; transport didn't).
+   */
+  function emitMessageSent(p: MessageSentParams): void {
+    if (!invokeAgents || !resolvedCfg || stopped) return;
+    let span: Span | undefined;
+    if (p.runId) span = invokeAgents.lookup({ by: "runId", value: p.runId });
+    if (!span && p.sessionKey) {
+      span = invokeAgents.lookup({ by: "sessionKey", value: p.sessionKey });
+    }
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {
+      "weave.message.to": p.to,
+      "weave.message.success": p.success,
+    };
+    if (p.channel) attrs["weave.message.channel"] = p.channel;
+    if (p.error) attrs["weave.message.error"] = p.error;
+    if (resolvedCfg.captureContent.outputMessages && p.content) {
+      const sanitized = sanitizeAttrStringWithFlag(p.content);
+      if (sanitized) {
+        attrs["weave.message.content"] = sanitized.value;
+        if (sanitized.redactions > 0) {
+          attrs["weave.redactions.count"] = sanitized.redactions;
+        }
+      }
+    }
+    span.addEvent("message_sent", attrs);
+  }
+
+  /**
    * Buffer or stamp a session_started span event. Buffers by sessionKey if no
    * invoke_agent is active for that key (typical case: session_start fires
    * before the first run of the session is born). Drained on the next
@@ -806,6 +856,7 @@ export function createWeaveService(
     endSubagentSpan,
     emitAgentEndSummary,
     emitMessageReceived,
+    emitMessageSent,
     emitSessionStart,
     emitSessionEnd,
     flushChatSpan,

@@ -1503,4 +1503,91 @@ describe("createWeaveService (integration)", () => {
     expect(ev?.attributes?.["weave.message.duration_ms"]).toBe(80);
     expect(ev?.attributes?.["error.type"]).toBe("TransportTimeout");
   });
+
+  test("emitMessageSent adds message_sent span event by runId with success+content", async () => {
+    const { service, emitMessageSent } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-out",
+      harnessId: "x",
+      sessionKey: "conv-out",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+
+    emitMessageSent({
+      runId: "r-out",
+      to: "alice",
+      content: "It's sunny in NYC.",
+      success: true,
+    });
+
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-out",
+      harnessId: "x",
+      durationMs: 50,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "message_sent");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.message.to"]).toBe("alice");
+    expect(ev?.attributes?.["weave.message.success"]).toBe(true);
+    expect(ev?.attributes?.["weave.message.content"]).toBe("It's sunny in NYC.");
+  });
+
+  test("emitMessageSent with success=false stamps error attribute", async () => {
+    const { service, emitMessageSent } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-fail",
+      harnessId: "x",
+      sessionKey: "conv-fail",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+
+    emitMessageSent({
+      runId: "r-fail",
+      to: "alice",
+      content: "...",
+      success: false,
+      error: "transport-timeout",
+    });
+
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-fail",
+      harnessId: "x",
+      durationMs: 50,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "message_sent");
+    expect(ev?.attributes?.["weave.message.success"]).toBe(false);
+    expect(ev?.attributes?.["weave.message.error"]).toBe("transport-timeout");
+  });
 });
