@@ -17,25 +17,7 @@ export type RawWeavePluginConfig = {
   enabled?: boolean;
   entity?: string;
   project?: string;
-  wandbApiKey?: string | SecretRef;
-  /**
-   * W&B install base URL (matches the Weave Python SDK's `WANDB_BASE_URL`
-   * env var). Defaults to `https://api.wandb.ai` (cloud / MTSaaS). For a
-   * dedicated install set this to your install hostname,
-   * e.g. `https://acme.wandb.io`. The plugin derives the trace-server URL
-   * per the Weave SDK rule (cloud → `https://trace.wandb.ai`; dedicated →
-   * `<base>/traces`) and appends `/agents/otel/v1/traces`. Falls back to
-   * the `WANDB_BASE_URL` env var when omitted.
-   */
-  wandbBaseUrl?: string;
-  /**
-   * Full trace-server URL override (matches the Weave Python SDK's
-   * `WF_TRACE_SERVER_URL` env var). Bypasses `wandbBaseUrl` derivation
-   * entirely; plugin appends `/agents/otel/v1/traces` and posts there.
-   * Use this for self-managed installs or routing through a proxy. Falls
-   * back to the `WF_TRACE_SERVER_URL` env var when omitted.
-   */
-  wfTraceServerUrl?: string;
+  apiKey?: string | SecretRef;
   serviceName?: string;
   agentName?: string;
   /**
@@ -84,26 +66,11 @@ export type RawWeavePluginConfig = {
    * the wrapper again until the regex is updated.
    */
   stripSenderWrapper?: boolean;
-  /**
-   * When true, dual-emit OTel-canonical `gen_ai.*` aliases alongside every
-   * `weave.*` attribute that has one (per Weave's `_ALIAS_TO_CANONICAL`
-   * table; verified against
-   * `weave/trace_server/agents/semconv.py`).
-   *
-   * Default true — improves portability to non-Weave OTel backends
-   * (Datadog, Honeycomb, LangSmith, Langfuse) which only recognise the
-   * `gen_ai.*` namespace. Cost: ~doubles attribute storage on the producer
-   * side per emitted span. The Weave server treats both forms identically
-   * via alias resolution, so toggling does not change Weave Agents-tab
-   * data quality. Set false to reduce wire size at the cost of portability.
-   */
-  emitGenAiAliases?: boolean;
 };
 
 export type ResolvedWeavePluginConfig = {
   entity: string;
   project: string;
-  endpoint: string;
   serviceName: string;
   agentName?: string;
   agentVersion?: string;
@@ -111,8 +78,6 @@ export type ResolvedWeavePluginConfig = {
   captureContent: WeaveContentCapture;
   flushIntervalMs: number;
   stripSenderWrapper: boolean;
-  /** Dual-emit `gen_ai.*` aliases alongside `weave.*`. Default true. */
-  emitGenAiAliases: boolean;
 };
 
 export const NO_CONTENT_CAPTURE: WeaveContentCapture = Object.freeze({
