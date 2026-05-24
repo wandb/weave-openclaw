@@ -1739,4 +1739,105 @@ describe("createWeaveService (integration)", () => {
     expect(longEv?.attributes?.["weave.session.classification"]).toBe("long_running");
     expect(longEv?.attributes?.["weave.session.age_ms"]).toBe(120_000);
   });
+
+  test("exec.process.completed stamps a span event on the active invoke_agent", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-exec",
+      harnessId: "x",
+      sessionKey: "conv-exec",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "exec.process.completed",
+      sessionKey: "conv-exec",
+      target: "sandbox",
+      mode: "child",
+      outcome: "failed",
+      durationMs: 1_500,
+      commandLength: 42,
+      exitCode: 1,
+      timedOut: false,
+      failureKind: "runtime-error",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    // exec.process.completed is async-dispatched; drain before run.completed.
+    await flushAsyncDiagnostics();
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-exec",
+      harnessId: "x",
+      durationMs: 1_600,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "exec.process.completed");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.exec.target"]).toBe("sandbox");
+    expect(ev?.attributes?.["weave.exec.mode"]).toBe("child");
+    expect(ev?.attributes?.["weave.exec.outcome"]).toBe("failed");
+    expect(ev?.attributes?.["weave.exec.duration_ms"]).toBe(1_500);
+    expect(ev?.attributes?.["weave.exec.exit_code"]).toBe(1);
+    expect(ev?.attributes?.["weave.exec.failure_kind"]).toBe("runtime-error");
+  });
+
+  test("skill.used stamps a span event on the active invoke_agent", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-skill",
+      harnessId: "x",
+      sessionKey: "conv-skill",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "skill.used",
+      runId: "r-skill",
+      sessionKey: "conv-skill",
+      skillName: "weather-forecast",
+      skillSource: "plugin",
+      activation: "explicit",
+      toolName: "lookup_weather",
+      toolCallId: "tc-7",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-skill",
+      harnessId: "x",
+      durationMs: 60,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "skill.used");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.skill.name"]).toBe("weather-forecast");
+    expect(ev?.attributes?.["weave.skill.source"]).toBe("plugin");
+    expect(ev?.attributes?.["weave.skill.activation"]).toBe("explicit");
+    expect(ev?.attributes?.["gen_ai.tool.name"]).toBe("lookup_weather");
+    expect(ev?.attributes?.["gen_ai.tool.call.id"]).toBe("tc-7");
+  });
 });

@@ -926,6 +926,14 @@ export function createWeaveService(
       handleSessionAttention(eventType, e);
       return;
     }
+    if (eventType === "exec.process.completed") {
+      handleExecProcess(e);
+      return;
+    }
+    if (eventType === "skill.used") {
+      handleSkillUsed(e);
+      return;
+    }
 
     const conversationIdHint = invokeAgents.sessionKeyForTrace(traceId);
 
@@ -1368,6 +1376,65 @@ export function createWeaveService(
       attrs["weave.session.terminal_progress_stale"] = true;
     }
     span.addEvent(eventName, attrs);
+  }
+
+  /**
+   * `exec.process.completed` marks the end of a shell process the agent
+   * spawned (skills, exec tools). The SDK doesn't emit a corresponding
+   * `exec.process.started`, so we can't bracket it as a child span — instead
+   * stamp a span event carrying durationMs so the operator can reconstruct
+   * the elapsed window. Failure detail (exitCode / failureKind / timedOut)
+   * is preserved when the process did not complete cleanly.
+   */
+  function handleExecProcess(e: Record<string, unknown>): void {
+    if (!invokeAgents) return;
+    const sessionKey = nonEmptyString(e.sessionKey);
+    if (!sessionKey) return;
+    const span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.target === "string") attrs["weave.exec.target"] = e.target;
+    if (typeof e.mode === "string") attrs["weave.exec.mode"] = e.mode;
+    if (typeof e.outcome === "string") attrs["weave.exec.outcome"] = e.outcome;
+    if (typeof e.durationMs === "number" && Number.isFinite(e.durationMs)) {
+      attrs["weave.exec.duration_ms"] = Math.trunc(e.durationMs);
+    }
+    if (typeof e.commandLength === "number" && Number.isFinite(e.commandLength)) {
+      attrs["weave.exec.command_length"] = Math.trunc(e.commandLength);
+    }
+    if (typeof e.exitCode === "number" && Number.isFinite(e.exitCode)) {
+      attrs["weave.exec.exit_code"] = Math.trunc(e.exitCode);
+    }
+    if (typeof e.exitSignal === "string") attrs["weave.exec.exit_signal"] = e.exitSignal;
+    if (e.timedOut === true) attrs["weave.exec.timed_out"] = true;
+    if (typeof e.failureKind === "string") attrs["weave.exec.failure_kind"] = e.failureKind;
+    span.addEvent("exec.process.completed", attrs);
+  }
+
+  /**
+   * `skill.used` records a skill activation — operator-readable signal of
+   * which agent skills actually fired during a run. Useful for "did this
+   * agent consult its docs / use its custom skill" questions. Stamps on
+   * the active invoke_agent (by runId preferred, sessionKey fallback).
+   */
+  function handleSkillUsed(e: Record<string, unknown>): void {
+    if (!invokeAgents) return;
+    const runId = nonEmptyString(e.runId);
+    const sessionKey = nonEmptyString(e.sessionKey);
+    let span: Span | undefined;
+    if (runId) span = invokeAgents.lookup({ by: "runId", value: runId });
+    if (!span && sessionKey) {
+      span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    }
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.skillName === "string") attrs["weave.skill.name"] = e.skillName;
+    if (typeof e.skillSource === "string") attrs["weave.skill.source"] = e.skillSource;
+    if (typeof e.activation === "string") attrs["weave.skill.activation"] = e.activation;
+    if (typeof e.toolName === "string") attrs["gen_ai.tool.name"] = e.toolName;
+    if (typeof e.toolCallId === "string") attrs["gen_ai.tool.call.id"] = e.toolCallId;
+    if (typeof e.agentId === "string") attrs["weave.skill.agent_id"] = e.agentId;
+    span.addEvent("skill.used", attrs);
   }
 
   async function teardownInternal(): Promise<void> {
