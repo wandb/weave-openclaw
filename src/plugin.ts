@@ -12,6 +12,9 @@ import {
   resolveCurrentCallId,
   captureLlmInput,
   captureLlmOutput,
+  captureToolStart,
+  captureToolEnd,
+  lookupToolCall,
 } from "./hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config.js";
 import { createRegistries, MAX_ENTRIES, type Registries } from "./registries.js";
@@ -188,6 +191,22 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     }
   };
 
+  handlers.hook.before_tool_call = (event) => {
+    if (!event.toolCallId) return;
+    captureToolStart(params.hookState, event.toolCallId, {
+      toolName: event.toolName,
+      params: event.params,
+      runId: event.runId,
+    });
+  };
+
+  handlers.hook.after_tool_call = (event) => {
+    if (!event.toolCallId) return;
+    captureToolEnd(params.hookState, event.toolCallId, {
+      result: event.result,
+    });
+  };
+
   handlers.hook.model_call_started = (event) => {
     if (event.runId && event.callId) {
       beginModelCall(params.hookState, event.runId, event.callId);
@@ -234,6 +253,10 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     if (event.type === "model.call.started") return onChatStart(event);
     if (event.type === "model.call.completed") return onChatFinalize(event, "ok", undefined);
     if (event.type === "model.call.error") return onChatFinalize(event, "error", event.errorCategory);
+    if (event.type === "tool.execution.started") return onToolStart(event);
+    if (event.type === "tool.execution.completed") return onToolFinalize(event, "ok", undefined);
+    if (event.type === "tool.execution.error") return onToolFinalize(event, "error", event.errorCategory);
+    if (event.type === "tool.execution.blocked") return onToolFinalize(event, "error", "blocked");
   };
 
   function onRunStarted(event: any): void {
@@ -336,6 +359,57 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     registries.calls.delete(callId);
     params.hookState.llmInputs.delete(callId);
     params.hookState.llmOutputs.delete(callId);
+  }
+
+  function onToolStart(event: any): void {
+    if (!resolved) return;
+    const runId: string | undefined = event.runId;
+    const toolCallId: string | undefined = event.toolCallId;
+    if (!runId || !toolCallId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    const captured = lookupToolCall(params.hookState, toolCallId).args;
+    const args = resolved.captureContent
+      ? safeJson(captured?.params ?? event.toolInput ?? event.paramsSummary)
+      : undefined;
+    const tool = runIsolated(() =>
+      turn.startTool({
+        name: event.toolName ?? captured?.toolName ?? "unknown",
+        toolCallId,
+        args,
+      }),
+    );
+    setBoundedMap(registries.tools, toolCallId, tool, MAX_ENTRIES);
+  }
+
+  function onToolFinalize(event: any, status: "ok" | "error", errorType: string | undefined): void {
+    const toolCallId: string | undefined = event.toolCallId;
+    if (!toolCallId) return;
+    const tool = registries.tools.get(toolCallId);
+    if (!tool) return;
+    if (resolved?.captureContent) {
+      const captured = lookupToolCall(params.hookState, toolCallId).result;
+      const result = safeJson(captured?.result ?? event.toolOutput);
+      if (result !== undefined) tool.result = result;
+    }
+    tool.end(
+      status === "error"
+        ? { error: new Error(errorType ?? "tool.execution.error") }
+        : undefined,
+    );
+    registries.tools.delete(toolCallId);
+    params.hookState.toolCallArgs.delete(toolCallId);
+    params.hookState.toolCallResults.delete(toolCallId);
+  }
+
+  function safeJson(v: unknown): string | undefined {
+    if (v === undefined || v === null) return undefined;
+    if (typeof v === "string") return v;
+    try {
+      return JSON.stringify(v);
+    } catch {
+      return undefined;
+    }
   }
 
   function shapeMessages(

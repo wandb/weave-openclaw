@@ -395,3 +395,165 @@ describe("llm two-signal close", () => {
     await finish();
   });
 });
+
+describe("tool lifecycle", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin({ captureContent: true });
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  async function endRun(dispatch: any, finish: () => Promise<void>) {
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 9000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+  }
+
+  it("opens an execute_tool span at tool.execution.started and ends at completed", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("before_tool_call", {
+      runId: "r",
+      toolCallId: "tc-1",
+      toolName: "search",
+      params: { q: "weave" },
+    });
+    dispatch.diagnostic({
+      type: "tool.execution.started",
+      ts: 1100,
+      runId: "r",
+      toolCallId: "tc-1",
+      toolName: "search",
+      trace: { traceId: "t", spanId: "tcsp", parentSpanId: "sp" },
+    });
+    dispatch.hook("after_tool_call", {
+      runId: "r",
+      toolCallId: "tc-1",
+      result: { hits: 7 },
+    });
+    dispatch.diagnostic({
+      type: "tool.execution.completed",
+      ts: 1300,
+      runId: "r",
+      toolCallId: "tc-1",
+      trace: { traceId: "t", spanId: "tcsp" },
+    });
+    await endRun(dispatch, finish);
+    const span = exporter.getFinishedSpans().find(s => s.name === "execute_tool");
+    expect(span).toBeDefined();
+    expect(span?.attributes["gen_ai.tool.name"]).toBe("search");
+    expect(span?.attributes["gen_ai.tool.call.id"]).toBe("tc-1");
+    expect(span?.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
+    expect(span?.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
+  });
+
+  it("records error status on tool.execution.error", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.execution.started",
+      ts: 1100,
+      runId: "r",
+      toolCallId: "tc-2",
+      toolName: "search",
+      trace: { traceId: "t", spanId: "tcsp2", parentSpanId: "sp" },
+    });
+    dispatch.diagnostic({
+      type: "tool.execution.error",
+      ts: 1300,
+      runId: "r",
+      toolCallId: "tc-2",
+      errorCategory: "Timeout",
+      trace: { traceId: "t", spanId: "tcsp2" },
+    });
+    await endRun(dispatch, finish);
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-2");
+    expect(span).toBeDefined();
+    expect(span?.status.code).toBe(2); // ERROR
+  });
+
+  it("records blocked tools as error", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.execution.started",
+      ts: 1100,
+      runId: "r",
+      toolCallId: "tc-3",
+      toolName: "search",
+      trace: { traceId: "t", spanId: "tcsp3", parentSpanId: "sp" },
+    });
+    dispatch.diagnostic({
+      type: "tool.execution.blocked",
+      ts: 1300,
+      runId: "r",
+      toolCallId: "tc-3",
+      trace: { traceId: "t", spanId: "tcsp3" },
+    });
+    await endRun(dispatch, finish);
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-3");
+    expect(span?.status.code).toBe(2); // ERROR
+  });
+
+  it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
+    const { createWeavePlugin } = await import("./plugin.js");
+    const { createWeaveHookState } = await import("./hook-state.js");
+    const hookState = createWeaveHookState();
+    const plugin = createWeavePlugin({
+      pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: false },
+      hookState,
+    });
+    await plugin.service.start({ logger: makeLogger() } as any);
+    const dispatch = makeFakeApi(plugin);
+    dispatch.diagnostic({
+      type: "run.started",
+      ts: 1,
+      runId: "r-nc",
+      sessionKey: "s-nc",
+      trace: { traceId: "tnc", spanId: "spnc" },
+    });
+    dispatch.hook("before_tool_call", {
+      runId: "r-nc",
+      toolCallId: "tc-nc",
+      toolName: "search",
+      params: { q: "secret" },
+    });
+    dispatch.diagnostic({
+      type: "tool.execution.started",
+      ts: 2,
+      runId: "r-nc",
+      toolCallId: "tc-nc",
+      toolName: "search",
+      trace: { traceId: "tnc", spanId: "tcspnc", parentSpanId: "spnc" },
+    });
+    dispatch.hook("after_tool_call", { runId: "r-nc", toolCallId: "tc-nc", result: { secret: "shhh" } });
+    dispatch.diagnostic({
+      type: "tool.execution.completed",
+      ts: 3,
+      runId: "r-nc",
+      toolCallId: "tc-nc",
+      trace: { traceId: "tnc", spanId: "tcspnc" },
+    });
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 4,
+      runId: "r-nc",
+      sessionKey: "s-nc",
+      trace: { traceId: "tnc", spanId: "spnc" },
+      outcome: "completed",
+    });
+    await plugin.service.stop({ logger: makeLogger() } as any);
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-nc");
+    expect(span?.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(span?.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+  });
+});
