@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Plugin rewritten against `weave.genai` SDK; ~80% LOC reduction. See `rgao/docs/2026-05-23-v2-sdk-refactor-design.md`.
+
 ## [0.0.1] — Initial release (2026-05-16)
 
 Initial release of `weave-openclaw`: an OpenClaw third-party plugin
