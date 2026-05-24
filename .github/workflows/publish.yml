@@ -1,0 +1,84 @@
+name: Publish Package
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: Git ref to publish, for example v0.0.1
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: publish-${{ github.event.inputs.release_ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ github.event.inputs.release_ref }}
+          fetch-depth: 0
+
+      - name: Verify release tag and version
+        env:
+          RELEASE_REF: ${{ github.event.inputs.release_ref }}
+        run: |
+          set -euo pipefail
+
+          if ! git rev-parse -q --verify "refs/tags/${RELEASE_REF}" >/dev/null; then
+            echo "::error::release_ref must be an existing tag, got '${RELEASE_REF}'"
+            exit 1
+          fi
+
+          PACKAGE_VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
+          PLUGIN_VERSION="$(node -p "JSON.parse(require('fs').readFileSync('openclaw.plugin.json', 'utf8')).version")"
+          SERVICE_VERSION="$(node -p "(require('fs').readFileSync('src/version.ts','utf8').match(/PACKAGE_VERSION\\s*=\\s*\"([^\"]+)\"/)||[])[1] || ''")"
+
+          if [ "${RELEASE_REF}" != "v${PACKAGE_VERSION}" ]; then
+            echo "::error::Tag ${RELEASE_REF} does not match package.json version v${PACKAGE_VERSION}"
+            exit 1
+          fi
+
+          if [ "${PLUGIN_VERSION}" != "${PACKAGE_VERSION}" ]; then
+            echo "::error::openclaw.plugin.json version (${PLUGIN_VERSION}) does not match package.json (${PACKAGE_VERSION})"
+            exit 1
+          fi
+
+          if [ "${SERVICE_VERSION}" != "${PACKAGE_VERSION}" ]; then
+            echo "::error::src/version.ts PACKAGE_VERSION (${SERVICE_VERSION}) does not match package.json (${PACKAGE_VERSION})"
+            exit 1
+          fi
+
+          if npm view "weave-openclaw@${PACKAGE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "::error::Version ${PACKAGE_VERSION} is already published to npm"
+            exit 1
+          fi
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1  # v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e  # v6
+        with:
+          node-version-file: package.json
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build package
+        run: pnpm build
+
+      - name: Publish to npm
+        run: pnpm publish --no-git-checks --access public
