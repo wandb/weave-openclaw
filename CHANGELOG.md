@@ -3,7 +3,25 @@
 ## Unreleased
 
 ### Changed
-- Plugin rewritten against `weave.genai` SDK; ~80% LOC reduction. See `rgao/docs/2026-05-23-v2-sdk-refactor-design.md`.
+- Rewrote plugin against `weave.genai` SDK surface. Spans flow through
+  Session / Turn / LLM / Tool / SubAgent handles; gen_ai.* attribute
+  writing, parent-context propagation, and OTLP transport are owned
+  by the SDK.
+
+### Removed
+- Redaction layer (`redact.ts`). Operators are expected to scrub content
+  upstream if needed.
+- Per-attribute truncation flags. Raw content flows to the OTLP
+  exporter.
+- `OPENCLAW_WEAVE_DEBUG` env (`spans` / `trace-tree`). The SDK owns
+  span parenting; these knobs were diagnostic for v1's hand-rolled
+  lifecycle.
+- Per-event-type handler-error and per-attribute truncation rate
+  limiters.
+- Fine-grained `captureContent` flags (5 booleans). Collapsed to a
+  single boolean (or `"on"` / `"off"`).
+- Standalone `context_compacted` child span. Now emitted as a span
+  event on the active invoke_agent.
 
 ## [0.0.1] — Initial release (2026-05-16)
 
