@@ -285,3 +285,113 @@ describe("turn lifecycle", () => {
     expect(turn).toBeDefined();
   });
 });
+
+describe("llm two-signal close", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin();
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  it("closes the chat span when llm_output and model.call.completed both arrive", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    dispatch.diagnostic({
+      type: "model.call.started",
+      ts: 1100,
+      runId: "r",
+      callId: "c-1",
+      model: "gpt-4o",
+      trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" },
+    });
+    dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "be helpful" });
+    dispatch.hook("llm_output", {
+      runId: "r",
+      assistantTexts: ["hello"],
+      usage: { input: 5, output: 3 },
+    });
+    dispatch.diagnostic({
+      type: "model.call.completed",
+      ts: 1500,
+      runId: "r",
+      callId: "c-1",
+      trace: { traceId: "t", spanId: "sp2" },
+    });
+    // Close the turn so the span exports.
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 1600,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    expect(chat).toBeDefined();
+    expect(chat?.attributes["gen_ai.request.model"]).toBe("gpt-4o");
+    expect(chat?.attributes["gen_ai.usage.input_tokens"]).toBe(5);
+    expect(chat?.attributes["gen_ai.usage.output_tokens"]).toBe(3);
+  });
+
+  it("closes immediately on model.call.error without llm_output", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    dispatch.diagnostic({
+      type: "model.call.started",
+      ts: 1100,
+      runId: "r",
+      callId: "c-1",
+      model: "gpt-4o",
+      trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" },
+    });
+    dispatch.diagnostic({
+      type: "model.call.error",
+      ts: 1200,
+      runId: "r",
+      callId: "c-1",
+      errorCategory: "ProviderTimeout",
+      trace: { traceId: "t", spanId: "sp2" },
+    });
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 1300,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    expect(chat).toBeDefined();
+    expect(chat?.status.code).toBe(2); // ERROR
+  });
+
+  it("promotes pendingLlmInputByRun when model_call_started arrives after llm_input", async () => {
+    const { dispatch, hookState, finish } = await setupTurn();
+    // llm_input fires before model_call_started — capture should buffer
+    // on pendingLlmInputByRun keyed by runId.
+    dispatch.hook("llm_input", { runId: "r", prompt: "hi" });
+    expect(hookState.pendingLlmInputByRun.has("r")).toBe(true);
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-promote" });
+    // Now the buffered input should be promoted to llmInputs[c-promote].
+    expect(hookState.pendingLlmInputByRun.has("r")).toBe(false);
+    expect(hookState.llmInputs.has("c-promote")).toBe(true);
+    // Close the turn so the span doesn't leak.
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 2000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+  });
+});

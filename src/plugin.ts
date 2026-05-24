@@ -3,8 +3,16 @@
 // SPDX-PackageName: weave-openclaw
 
 import { flushOTel, init as weaveInit, runIsolated, startSession, startTurn } from "weave";
+import type { Message, Usage } from "weave";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type { WeaveHookState } from "./hook-state.js";
+import {
+  beginModelCall,
+  bufferPendingLlmInputForRun,
+  resolveCurrentCallId,
+  captureLlmInput,
+  captureLlmOutput,
+} from "./hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config.js";
 import { createRegistries, MAX_ENTRIES, type Registries } from "./registries.js";
 import { setBoundedMap } from "./bounded-map.js";
@@ -180,10 +188,52 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     }
   };
 
+  handlers.hook.model_call_started = (event) => {
+    if (event.runId && event.callId) {
+      beginModelCall(params.hookState, event.runId, event.callId);
+    }
+  };
+
+  handlers.hook.llm_input = (event) => {
+    const capture = {
+      systemPrompt: event.systemPrompt,
+      prompt: event.prompt,
+      historyMessages: event.historyMessages,
+    };
+    const callId = event.runId
+      ? resolveCurrentCallId(params.hookState, event.runId)
+      : undefined;
+    if (callId) {
+      captureLlmInput(params.hookState, callId, capture);
+    } else if (event.runId) {
+      bufferPendingLlmInputForRun(params.hookState, event.runId, capture);
+    }
+  };
+
+  handlers.hook.llm_output = (event) => {
+    const callId = event.runId
+      ? resolveCurrentCallId(params.hookState, event.runId)
+      : undefined;
+    if (!callId) return;
+    captureLlmOutput(params.hookState, callId, {
+      assistantTexts: event.assistantTexts ?? [],
+      lastAssistant: event.lastAssistant,
+      usage: event.usage,
+    });
+    const h = registries.calls.get(callId);
+    if (h) {
+      h.hookDone = true;
+      maybeCloseLlm(callId);
+    }
+  };
+
   handlers.diagnostic = (event, meta) => {
     if (!meta.trusted) return;
     if (event.type === "run.started") return onRunStarted(event);
     if (event.type === "run.completed") return onRunFinalize(event);
+    if (event.type === "model.call.started") return onChatStart(event);
+    if (event.type === "model.call.completed") return onChatFinalize(event, "ok", undefined);
+    if (event.type === "model.call.error") return onChatFinalize(event, "error", event.errorCategory);
   };
 
   function onRunStarted(event: any): void {
@@ -226,6 +276,109 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       turn.end();
     }
     registries.turns.delete(event.runId);
+  }
+
+  function onChatStart(event: any): void {
+    if (!resolved) return;
+    const runId: string | undefined = event.runId;
+    const callId: string | undefined = event.callId;
+    if (!runId || !callId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    const llm = runIsolated(() =>
+      turn.startLLM({
+        model: event.model ?? "unknown",
+        providerName: event.provider,
+      }),
+    );
+    setBoundedMap(
+      registries.calls,
+      callId,
+      { llm, hookDone: false, diagDone: false, status: "ok" },
+      MAX_ENTRIES,
+    );
+  }
+
+  function onChatFinalize(event: any, status: "ok" | "error", errorType: string | undefined): void {
+    const callId: string | undefined = event.callId;
+    if (!callId) return;
+    const h = registries.calls.get(callId);
+    if (!h) return;
+    h.diagDone = true;
+    h.endTimeMs = event.ts;
+    h.status = status;
+    h.errorType = errorType;
+    // Errors don't wait for llm_output (it never fires on error).
+    if (status === "error") h.hookDone = true;
+    maybeCloseLlm(callId);
+  }
+
+  function maybeCloseLlm(callId: string): void {
+    const h = registries.calls.get(callId);
+    if (!h || !h.hookDone || !h.diagDone) return;
+    const cap = {
+      input: params.hookState.llmInputs.get(callId),
+      output: params.hookState.llmOutputs.get(callId),
+    };
+    const shaped = shapeMessages(cap, resolved?.captureContent ?? false);
+    if (shaped.input.length || shaped.output.length || shaped.usage) {
+      h.llm.record({
+        inputMessages: shaped.input,
+        outputMessages: shaped.output,
+        usage: shaped.usage,
+      });
+    }
+    h.llm.end(
+      h.status === "error"
+        ? { error: new Error(h.errorType ?? "model.call.error") }
+        : undefined,
+    );
+    registries.calls.delete(callId);
+    params.hookState.llmInputs.delete(callId);
+    params.hookState.llmOutputs.delete(callId);
+  }
+
+  function shapeMessages(
+    cap: {
+      input?: { systemPrompt?: string; prompt: string; historyMessages?: unknown[] };
+      output?: { assistantTexts: string[]; lastAssistant?: unknown; usage?: any };
+    },
+    captureContent: boolean,
+  ): { input: Message[]; output: Message[]; usage?: Usage } {
+    const out: { input: Message[]; output: Message[]; usage?: Usage } = { input: [], output: [] };
+    if (captureContent && cap.input) {
+      if (cap.input.systemPrompt) {
+        out.input.push({ role: "system", content: cap.input.systemPrompt });
+      }
+      if (Array.isArray(cap.input.historyMessages)) {
+        for (const m of cap.input.historyMessages) {
+          if (m && typeof m === "object" && "role" in m && "content" in m) {
+            out.input.push(m as Message);
+          }
+        }
+      }
+      if (cap.input.prompt) {
+        out.input.push({ role: "user", content: cap.input.prompt });
+      }
+    }
+    if (captureContent && cap.output) {
+      for (const t of cap.output.assistantTexts) {
+        out.output.push({ role: "assistant", content: t });
+      }
+    }
+    // Usage tokens are always recorded regardless of captureContent — only
+    // the message content is gated by the flag.
+    const u = cap.output?.usage;
+    if (u) {
+      out.usage = {
+        inputTokens: typeof u.input === "number" ? u.input : undefined,
+        outputTokens: typeof u.output === "number" ? u.output : undefined,
+        reasoningTokens: typeof u.reasoning === "number" ? u.reasoning : undefined,
+        cacheReadInputTokens: typeof u.cacheRead === "number" ? u.cacheRead : undefined,
+        cacheCreationInputTokens: typeof u.cacheWrite === "number" ? u.cacheWrite : undefined,
+      };
+    }
+    return out;
   }
 
   return { service, registries, getStatus, handlers };
