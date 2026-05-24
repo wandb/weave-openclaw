@@ -2,11 +2,12 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { flushOTel, init as weaveInit } from "weave";
+import { flushOTel, init as weaveInit, runIsolated, startSession, startTurn } from "weave";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type { WeaveHookState } from "./hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config.js";
-import { createRegistries, type Registries } from "./registries.js";
+import { createRegistries, MAX_ENTRIES, type Registries } from "./registries.js";
+import { setBoundedMap } from "./bounded-map.js";
 import { formatStatus, type StatusSnapshot } from "./status.js";
 import { PACKAGE_VERSION } from "./version.js";
 
@@ -144,7 +145,90 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     return snap;
   }
 
-  return { service, registries, getStatus, handlers: { hook: {} } };
+  const handlers: WeavePlugin["handlers"] = {
+    hook: {},
+  };
+
+  handlers.hook.session_start = (event) => {
+    const key = event.sessionKey;
+    if (!key || !resolved || registries.sessions.has(key)) return;
+    const session = runIsolated(() =>
+      startSession({
+        sessionId: key,
+        agentName: resolved!.agentName,
+      }),
+    );
+    setBoundedMap(registries.sessions, key, session, MAX_ENTRIES);
+  };
+
+  handlers.hook.session_end = (event) => {
+    const key = event.sessionKey;
+    if (!key) return;
+    registries.sessions.get(key)?.end();
+    registries.sessions.delete(key);
+  };
+
+  handlers.hook.agent_end = (event) => {
+    const turn = registries.turns.get(event.runId);
+    if (!turn) return;
+    if (typeof event.success === "boolean") {
+      turn.setAttribute("weave.agent.success", event.success);
+    }
+    if (event.error) turn.setAttribute("weave.agent.error", String(event.error));
+    if (typeof event.durationMs === "number" && Number.isFinite(event.durationMs)) {
+      turn.setAttribute("weave.agent.duration_ms", Math.trunc(event.durationMs));
+    }
+  };
+
+  handlers.diagnostic = (event, meta) => {
+    if (!meta.trusted) return;
+    if (event.type === "run.started") return onRunStarted(event);
+    if (event.type === "run.completed") return onRunFinalize(event);
+  };
+
+  function onRunStarted(event: any): void {
+    if (!resolved) return;
+    if (registries.turns.has(event.runId)) return;
+    const sessionKey: string | undefined = event.sessionKey;
+    const existingSession = sessionKey ? registries.sessions.get(sessionKey) : undefined;
+    const session =
+      existingSession ??
+      (sessionKey
+        ? (() => {
+            const s = runIsolated(() =>
+              startSession({
+                sessionId: sessionKey,
+                agentName: resolved!.agentName,
+              }),
+            );
+            setBoundedMap(registries.sessions, sessionKey, s, MAX_ENTRIES);
+            return s;
+          })()
+        : undefined);
+    const turn = runIsolated(() =>
+      session
+        ? session.startTurn({ agentName: resolved!.agentName, model: event.model })
+        : startTurn({ agentName: resolved!.agentName, model: event.model }),
+    );
+    if (resolved.agentVersion) turn.setAttribute("weave.agent.version", resolved.agentVersion);
+    if (resolved.agentDescription) turn.setAttribute("weave.agent.description", resolved.agentDescription);
+    setBoundedMap(registries.turns, event.runId, turn, MAX_ENTRIES);
+  }
+
+  function onRunFinalize(event: any): void {
+    const turn = registries.turns.get(event.runId);
+    if (!turn) return;
+    const outcome = typeof event.outcome === "string" ? event.outcome : undefined;
+    if (outcome) turn.setAttribute("weave.outcome", outcome);
+    if (outcome && outcome !== "completed") {
+      turn.end({ error: new Error(outcome) });
+    } else {
+      turn.end();
+    }
+    registries.turns.delete(event.runId);
+  }
+
+  return { service, registries, getStatus, handlers };
 }
 
 export function renderStatus(plugin: WeavePlugin): string {
