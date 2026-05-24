@@ -1840,4 +1840,36 @@ describe("createWeaveService (integration)", () => {
     expect(ev?.attributes?.["gen_ai.tool.name"]).toBe("lookup_weather");
     expect(ev?.attributes?.["gen_ai.tool.call.id"]).toBe("tc-7");
   });
+
+  test("diagnostic.async_queue.dropped accumulates into getStatus counter", async () => {
+    const { service, getStatus } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    expect(getStatus().droppedDiagnosticEvents).toBeUndefined();
+
+    emitTrustedDiagnosticEvent({
+      type: "diagnostic.async_queue.dropped",
+      droppedEvents: 7,
+      droppedTrustedEvents: 5,
+      droppedUntrustedEvents: 2,
+      queueLength: 1024,
+      maxQueueLength: 1024,
+      drainBatchSize: 128,
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "diagnostic.async_queue.dropped",
+      droppedEvents: 3,
+      queueLength: 1024,
+      maxQueueLength: 1024,
+      drainBatchSize: 128,
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    expect(getStatus().droppedDiagnosticEvents).toBe(10);
+    await service.stop?.(ctx);
+  });
 });

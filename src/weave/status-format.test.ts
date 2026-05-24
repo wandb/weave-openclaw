@@ -83,4 +83,16 @@ describe("formatWeaveStatus", () => {
     const out = formatWeaveStatus(s, NOW);
     expect(out).toMatch(/since .* \(2h 30m ago\)/);
   });
+
+  test("droppedDiagnosticEvents > 0 renders a dropped line", () => {
+    const out = formatWeaveStatus(snap({ droppedDiagnosticEvents: 42 }), NOW);
+    expect(out).toContain("droppedDiagnosticEvents: 42");
+  });
+
+  test("droppedDiagnosticEvents omitted or zero does not pollute the output", () => {
+    expect(formatWeaveStatus(snap(), NOW)).not.toContain("dropped");
+    expect(formatWeaveStatus(snap({ droppedDiagnosticEvents: 0 }), NOW)).not.toContain(
+      "dropped",
+    );
+  });
 });

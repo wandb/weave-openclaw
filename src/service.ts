@@ -173,6 +173,14 @@ export type WeaveStatusSnapshot = {
   };
   /** OpenClaw spans currently indexed in the SpanRegistry. */
   activeSpans: number;
+  /**
+   * Cumulative count of `diagnostic.async_queue.dropped` events the gateway
+   * has reported since this service started. Non-zero means the gateway is
+   * shedding load and some diagnostic events (and therefore spans) never
+   * reached this plugin. Surfaced in `/weave status` so operators see it
+   * inline.
+   */
+  droppedDiagnosticEvents?: number;
 };
 
 export type CompactionSpanParams = {
@@ -353,6 +361,7 @@ export function createWeaveService(
   let resolvedAuthSource: string | undefined;
   let resolvedUiUrl: string | undefined;
   let resolvedCaptureSummary: string | undefined;
+  let droppedDiagnosticEvents = 0;
 
   const service: OpenClawPluginService = {
     id: "weave",
@@ -833,6 +842,9 @@ export function createWeaveService(
       startedAt,
       activeSpans: spans?.size() ?? 0,
     };
+    if (droppedDiagnosticEvents > 0) {
+      snap.droppedDiagnosticEvents = droppedDiagnosticEvents;
+    }
     if (resolvedCfg) {
       snap.config = {
         entity: resolvedCfg.entity,
@@ -868,6 +880,17 @@ export function createWeaveService(
     _meta: DiagnosticEventMetadata,
   ): void {
     if (!spans || !invokeAgents || !pending || !resolvedCfg) return;
+
+    // `diagnostic.async_queue.dropped` is informational about the gateway's
+    // event bus itself — never carries trace context. Handle before the
+    // traceId guard so the counter still increments under load.
+    if ((event.type as string) === "diagnostic.async_queue.dropped") {
+      const dropped = (event as unknown as { droppedEvents?: unknown }).droppedEvents;
+      if (typeof dropped === "number" && Number.isFinite(dropped) && dropped > 0) {
+        droppedDiagnosticEvents += Math.trunc(dropped);
+      }
+      return;
+    }
 
     const traceId = event.trace?.traceId;
     if (!traceId) {

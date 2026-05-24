@@ -37,6 +37,10 @@ export function formatWeaveStatus(
     lines.push(`activeSpans: ${snap.activeSpans}`);
   }
 
+  if (snap.droppedDiagnosticEvents && snap.droppedDiagnosticEvents > 0) {
+    lines.push(`droppedDiagnosticEvents: ${snap.droppedDiagnosticEvents}`);
+  }
+
   return lines.join("\n");
 }
 
