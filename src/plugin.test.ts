@@ -557,3 +557,147 @@ describe("tool lifecycle", () => {
     expect(span?.attributes["gen_ai.tool.call.result"]).toBeUndefined();
   });
 });
+
+describe("side-channel attrs on Turn", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin({ captureContent: true });
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  async function endRun(dispatch: any, finish: () => Promise<void>) {
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 9000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+  }
+
+  it("accumulates cost across multiple model.usage events", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace: { traceId: "t", spanId: "sp" } });
+    dispatch.diagnostic({ type: "model.usage", ts: 2, runId: "r", costUsd: 0.10, trace: { traceId: "t", spanId: "sp" } });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn?.attributes["weave.cost.usd"]).toBeCloseTo(0.15);
+  });
+
+  it("stamps total usage from model.usage", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "model.usage",
+      ts: 1,
+      runId: "r",
+      usage: { input: 100, output: 50, cacheRead: 200, cacheWrite: 30, total: 380 },
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn?.attributes["weave.usage.total.input_tokens"]).toBe(100);
+    expect(turn?.attributes["weave.usage.total.output_tokens"]).toBe(50);
+    expect(turn?.attributes["weave.usage.total.cache_read.input_tokens"]).toBe(200);
+    expect(turn?.attributes["weave.usage.total.cache_creation.input_tokens"]).toBe(30);
+    expect(turn?.attributes["weave.usage.total.tokens"]).toBe(380);
+  });
+
+  it("adds tool.loop as a span event", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.loop",
+      ts: 1,
+      runId: "r",
+      toolName: "search",
+      level: "warn",
+      action: "abort",
+      count: 3,
+      message: "same args 3x",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "tool.loop");
+    expect(ev?.attributes?.["gen_ai.tool.name"]).toBe("search");
+    expect(ev?.attributes?.["weave.loop.level"]).toBe("warn");
+    expect(ev?.attributes?.["weave.loop.count"]).toBe(3);
+    expect(ev?.attributes?.["weave.loop.action"]).toBe("abort");
+    expect(ev?.attributes?.["weave.loop.message"]).toBe("same args 3x");
+  });
+
+  it("stamps context.assembled fields on the Turn", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "context.assembled",
+      ts: 1,
+      runId: "r",
+      contextTokenBudget: 200000,
+      messageCount: 12,
+      historyTextChars: 5000,
+      promptChars: 200,
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn?.attributes["weave.context.budget_tokens"]).toBe(200000);
+    expect(turn?.attributes["weave.context.message_count"]).toBe(12);
+    expect(turn?.attributes["weave.context.history_text_chars"]).toBe(5000);
+    expect(turn?.attributes["weave.context.prompt_chars"]).toBe(200);
+  });
+
+  it("adds run.attempt as a span event with attempt number", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "run.attempt",
+      ts: 1,
+      runId: "r",
+      attempt: 2,
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "run_attempt");
+    expect(ev?.attributes?.["weave.run.attempt"]).toBe(2);
+  });
+
+  it("adds message_received as a span event with content when captureContent=true", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("message_received", {
+      runId: "r",
+      from: "user@example.com",
+      channel: "telegram",
+      content: "hello",
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "message_received");
+    expect(ev?.attributes?.["weave.message.from"]).toBe("user@example.com");
+    expect(ev?.attributes?.["weave.message.channel"]).toBe("telegram");
+    expect(ev?.attributes?.["weave.message.content"]).toBe("hello");
+  });
+
+  it("agent_end also adds agent_end_summary span event", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("agent_end", {
+      runId: "r",
+      success: true,
+      durationMs: 1200,
+      lastAssistantMessage: "all done",
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    const ev = turn?.events.find(e => e.name === "agent_end_summary");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.agent.success"]).toBe(true);
+    expect(ev?.attributes?.["weave.agent.duration_ms"]).toBe(1200);
+    expect(ev?.attributes?.["weave.agent.final_message"]).toBe("all done");
+  });
+});

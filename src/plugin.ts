@@ -44,6 +44,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let lifecycle: StatusSnapshot["lifecycle"] = "not-started";
   let lifecycleDetail: string | undefined;
   let startedAt: number | undefined;
+  const costByRun = new Map<string, number>();
 
   const service: OpenClawPluginService = {
     id: "weave",
@@ -189,6 +190,31 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     if (typeof event.durationMs === "number" && Number.isFinite(event.durationMs)) {
       turn.setAttribute("weave.agent.duration_ms", Math.trunc(event.durationMs));
     }
+    // Also emit a span event so timeline views surface the end summary inline.
+    const evAttrs: Record<string, string | number | boolean> = {};
+    if (typeof event.success === "boolean") evAttrs["weave.agent.success"] = event.success;
+    if (event.error) evAttrs["weave.agent.error"] = String(event.error);
+    if (typeof event.durationMs === "number" && Number.isFinite(event.durationMs)) {
+      evAttrs["weave.agent.duration_ms"] = Math.trunc(event.durationMs);
+    }
+    if (resolved?.captureContent && event.lastAssistantMessage) {
+      evAttrs["weave.agent.final_message"] = String(event.lastAssistantMessage);
+    }
+    turn.addEvent("agent_end_summary", evAttrs);
+  };
+
+  handlers.hook.message_received = (event) => {
+    if (!event.runId) return;
+    const turn = registries.turns.get(event.runId);
+    if (!turn) return;
+    const attrs: Record<string, string | number | boolean> = {
+      "weave.message.from": String(event.from ?? ""),
+    };
+    if (event.channel) attrs["weave.message.channel"] = String(event.channel);
+    if (resolved?.captureContent && event.content) {
+      attrs["weave.message.content"] = String(event.content);
+    }
+    turn.addEvent("message_received", attrs);
   };
 
   handlers.hook.before_tool_call = (event) => {
@@ -257,6 +283,10 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     if (event.type === "tool.execution.completed") return onToolFinalize(event, "ok", undefined);
     if (event.type === "tool.execution.error") return onToolFinalize(event, "error", event.errorCategory);
     if (event.type === "tool.execution.blocked") return onToolFinalize(event, "error", "blocked");
+    if (event.type === "model.usage") return onModelUsage(event);
+    if (event.type === "tool.loop") return onToolLoop(event);
+    if (event.type === "context.assembled") return onContextAssembled(event);
+    if (event.type === "run.attempt") return onRunAttempt(event);
   };
 
   function onRunStarted(event: any): void {
@@ -299,6 +329,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       turn.end();
     }
     registries.turns.delete(event.runId);
+    costByRun.delete(event.runId);
   }
 
   function onChatStart(event: any): void {
@@ -453,6 +484,83 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       };
     }
     return out;
+  }
+
+  function onModelUsage(event: any): void {
+    const runId: string | undefined = event.runId;
+    if (!runId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    if (typeof event.costUsd === "number" && Number.isFinite(event.costUsd)) {
+      const total = (costByRun.get(runId) ?? 0) + event.costUsd;
+      costByRun.set(runId, total);
+      turn.setAttribute("weave.cost.usd", total);
+    }
+    const u = event.usage;
+    if (u && typeof u === "object") {
+      setIfInt(turn, "weave.usage.total.input_tokens", u.input);
+      setIfInt(turn, "weave.usage.total.output_tokens", u.output);
+      setIfInt(turn, "weave.usage.total.cache_read.input_tokens", u.cacheRead);
+      setIfInt(turn, "weave.usage.total.cache_creation.input_tokens", u.cacheWrite);
+      setIfInt(turn, "weave.usage.total.tokens", u.total);
+    }
+    const c = event.context;
+    if (c && typeof c === "object") {
+      setIfInt(turn, "weave.context.budget_tokens", c.limit);
+      setIfInt(turn, "weave.context.used_tokens", c.used);
+    }
+  }
+
+  function onToolLoop(event: any): void {
+    const runId: string | undefined = event.runId;
+    if (!runId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof event.toolName === "string") attrs["gen_ai.tool.name"] = event.toolName;
+    if (typeof event.level === "string") attrs["weave.loop.level"] = event.level;
+    if (typeof event.action === "string") attrs["weave.loop.action"] = event.action;
+    if (typeof event.count === "number" && Number.isFinite(event.count) && event.count >= 0) {
+      attrs["weave.loop.count"] = Math.trunc(event.count);
+    }
+    if (typeof event.message === "string") attrs["weave.loop.message"] = event.message;
+    if (typeof event.detector === "string") attrs["weave.loop.detector"] = event.detector;
+    turn.addEvent("tool.loop", attrs);
+  }
+
+  function onContextAssembled(event: any): void {
+    const runId: string | undefined = event.runId;
+    if (!runId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    setIfInt(turn, "weave.context.message_count", event.messageCount);
+    setIfInt(turn, "weave.context.history_text_chars", event.historyTextChars);
+    setIfInt(turn, "weave.context.history_image_blocks", event.historyImageBlocks);
+    setIfInt(turn, "weave.context.system_prompt_chars", event.systemPromptChars);
+    setIfInt(turn, "weave.context.prompt_chars", event.promptChars);
+    setIfInt(turn, "weave.context.prompt_images", event.promptImages);
+    setIfInt(turn, "weave.context.budget_tokens", event.contextTokenBudget);
+    setIfInt(turn, "weave.context.reserve_tokens", event.reserveTokens);
+  }
+
+  function onRunAttempt(event: any): void {
+    const runId: string | undefined = event.runId;
+    if (!runId) return;
+    const turn = registries.turns.get(runId);
+    if (!turn) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof event.attempt === "number" && Number.isFinite(event.attempt)) {
+      attrs["weave.run.attempt"] = Math.trunc(event.attempt);
+    }
+    if (Object.keys(attrs).length === 0) return;
+    turn.addEvent("run_attempt", attrs);
+  }
+
+  function setIfInt(turn: ReturnType<typeof registries.turns.get>, key: string, v: unknown): void {
+    if (!turn) return;
+    if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+      turn.setAttribute(key, Math.trunc(v));
+    }
   }
 
   return { service, registries, getStatus, handlers };
