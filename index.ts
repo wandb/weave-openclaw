@@ -13,7 +13,7 @@ import {
 } from "./src/hook-state.js";
 import { checkSdkCompat } from "./src/sdk-compat.js";
 import { createWeaveService } from "./src/service.js";
-import { formatWeaveStatus } from "./src/status-format.js";
+import { formatWeaveStatus } from "./src/weave/status-format.js";
 
 export default definePluginEntry({
   id: "weave",

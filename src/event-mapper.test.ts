@@ -7,7 +7,7 @@ import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runt
 import { describe, expect, it, test } from "vitest";
 import { mapDiagnosticEventToWeaveSpan, stripWrapperPrefix } from "./event-mapper.js";
 import { createWeaveHookState } from "./hook-state.js";
-import { NO_CONTENT_CAPTURE, type ResolvedWeavePluginConfig } from "./types.js";
+import { NO_CONTENT_CAPTURE, type ResolvedWeavePluginConfig } from "./weave/types.js";
 
 const TRACE_ID = "0123456789abcdef0123456789abcdef";
 const ROOT_SPAN_ID = "1111111111111111";

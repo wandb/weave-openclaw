@@ -20,19 +20,19 @@ import {
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type { SecretRef } from "openclaw/plugin-sdk/secret-ref-runtime";
-import { setBoundedMap } from "./bounded-map.js";
+import { setBoundedMap } from "./otel/bounded-map.js";
 import { mapDiagnosticEventToWeaveSpan } from "./event-mapper.js";
 import type { WeaveHookState } from "./hook-state.js";
-import { InvokeAgentIndex } from "./invoke-agent-index.js";
-import { PendingTraceState } from "./pending-trace-state.js";
-import { sanitizeAttrStringWithFlag } from "./redact.js";
-import { SpanRegistry, type DebugLogger } from "./span-registry.js";
+import { InvokeAgentIndex } from "./otel/invoke-agent-index.js";
+import { PendingTraceState } from "./otel/pending-trace-state.js";
+import { sanitizeAttrStringWithFlag } from "./otel/redact.js";
+import { SpanRegistry, type DebugLogger } from "./otel/span-registry.js";
 import {
   resolveContentCapture,
   type RawWeavePluginConfig,
   type ResolvedWeavePluginConfig,
-} from "./types.js";
-import { PACKAGE_NAME, PACKAGE_VERSION } from "./version.js";
+} from "./weave/types.js";
+import { PACKAGE_NAME, PACKAGE_VERSION } from "./weave/version.js";
 
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 

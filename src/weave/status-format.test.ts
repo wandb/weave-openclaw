@@ -3,7 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { describe, expect, test } from "vitest";
-import type { WeaveStatusSnapshot } from "./service.js";
+import type { WeaveStatusSnapshot } from "../service.js";
 import { formatWeaveStatus } from "./status-format.js";
 
 const NOW = Date.parse("2026-05-18T12:00:00Z");

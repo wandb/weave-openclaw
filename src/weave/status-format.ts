@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import type { WeaveStatusSnapshot } from "./service.js";
+import type { WeaveStatusSnapshot } from "../service.js";
 
 /**
  * Render a `WeaveStatusSnapshot` into the multi-line text body returned by the

@@ -4,18 +4,18 @@
 
 import { SpanKind } from "@opentelemetry/api";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { stableAgentId } from "./agent-id.js";
+import { stableAgentId } from "./weave/agent-id.js";
 import type { WeaveHookState } from "./hook-state.js";
 import { lookupLlm, lookupToolCall } from "./hook-state.js";
-import { detectOutputType } from "./output-type.js";
+import { detectOutputType } from "./otel/output-type.js";
 import {
   sanitizeAttrJson,
   sanitizeAttrJsonWithFlag,
   sanitizeAttrString,
   sanitizeAttrStringWithFlag,
   type SanitizedWithFlag,
-} from "./redact.js";
-import type { ResolvedWeavePluginConfig } from "./types.js";
+} from "./otel/redact.js";
+import type { ResolvedWeavePluginConfig } from "./weave/types.js";
 
 export type WeaveAttrValue = string | number | boolean;
 export type WeaveAttrs = Record<string, WeaveAttrValue>;
