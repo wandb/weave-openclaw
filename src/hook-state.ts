@@ -21,12 +21,10 @@ import { setBoundedMap } from "./bounded-map.js";
  *     populated by the `model_call_started` hook (which does carry callId).
  *   - toolCallArgs / toolCallResults: keyed by toolCallId, which is unique
  *     per call.
- *   - pendingCompactions: keyed by runId; compaction is a singleton per run.
  */
 
 const MAX_CALLS = 4096;
 const MAX_TOOL_CALLS = 4096;
-const MAX_COMPACTIONS = 1024;
 const MAX_RUNS_TO_TRACK = 4096;
 
 export type LlmInputCapture = {
@@ -59,19 +57,6 @@ export type ToolCallResultCapture = {
   result?: unknown;
 };
 
-export type CompactionCapture = {
-  /** Active compaction trace context, set when before_compaction fires. */
-  startTimeMs: number;
-  messageCount: number;
-  tokenCount?: number;
-  compactingCount?: number;
-  /** Trace context inherited from the hook's PluginHookAgentContext. */
-  traceId?: string;
-  parentSpanId?: string;
-  /** Agent context fields propagated to the compaction span. */
-  sessionKey?: string;
-};
-
 export type WeaveHookState = {
   /** callId -> input capture from llm_input hook. */
   llmInputs: Map<string, LlmInputCapture>;
@@ -94,7 +79,6 @@ export type WeaveHookState = {
   pendingLlmInputByRun: Map<string, LlmInputCapture>;
   toolCallArgs: Map<string, ToolCallArgsCapture>;
   toolCallResults: Map<string, ToolCallResultCapture>;
-  pendingCompactions: Map<string, CompactionCapture>;
 };
 
 export function createWeaveHookState(): WeaveHookState {
@@ -105,7 +89,6 @@ export function createWeaveHookState(): WeaveHookState {
     pendingLlmInputByRun: new Map(),
     toolCallArgs: new Map(),
     toolCallResults: new Map(),
-    pendingCompactions: new Map(),
   };
 }
 
@@ -237,25 +220,6 @@ export function captureToolEnd(
 ): void {
   if (!toolCallId) return;
   setBoundedMap(state.toolCallResults, toolCallId, capture, MAX_TOOL_CALLS);
-}
-
-export function captureCompactionStart(
-  state: WeaveHookState,
-  runId: string,
-  capture: CompactionCapture,
-): void {
-  if (!runId) return;
-  setBoundedMap(state.pendingCompactions, runId, capture, MAX_COMPACTIONS);
-}
-
-export function consumeCompaction(
-  state: WeaveHookState,
-  runId: string,
-): CompactionCapture | undefined {
-  if (!runId) return undefined;
-  const v = state.pendingCompactions.get(runId);
-  state.pendingCompactions.delete(runId);
-  return v;
 }
 
 /**
