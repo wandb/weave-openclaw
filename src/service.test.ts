@@ -1639,4 +1639,104 @@ describe("createWeaveService (integration)", () => {
     expect(ev?.attributes?.["weave.failover.reason"]).toBe("rate_limit");
     expect(ev?.attributes?.["weave.failover.cascade_depth"]).toBe(1);
   });
+
+  test("session.stalled stamps a session_attention span event on the invoke_agent", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-st",
+      harnessId: "x",
+      sessionKey: "conv-st",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "session.stalled",
+      sessionKey: "conv-st",
+      state: "active",
+      ageMs: 12_345,
+      classification: "blocked_tool_call",
+      activeToolName: "web.search",
+      activeToolCallId: "tc-1",
+      activeToolAgeMs: 8_000,
+      reason: "tool exceeded deadline",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-st",
+      harnessId: "x",
+      durationMs: 13_000,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "session.stalled");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.session.classification"]).toBe("blocked_tool_call");
+    expect(ev?.attributes?.["weave.session.age_ms"]).toBe(12_345);
+    expect(ev?.attributes?.["gen_ai.tool.name"]).toBe("web.search");
+    expect(ev?.attributes?.["weave.session.active_tool_age_ms"]).toBe(8_000);
+    expect(ev?.attributes?.["weave.session.reason"]).toBe("tool exceeded deadline");
+  });
+
+  test("session.stuck and session.long_running route through the same handler", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-stuck",
+      harnessId: "x",
+      sessionKey: "conv-stuck",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "session.stuck",
+      sessionKey: "conv-stuck",
+      state: "active",
+      ageMs: 60_000,
+      classification: "stale_session_state",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "session.long_running",
+      sessionKey: "conv-stuck",
+      state: "active",
+      ageMs: 120_000,
+      classification: "long_running",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-stuck",
+      harnessId: "x",
+      durationMs: 130_000,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const stuckEv = invoke?.events.find((e) => e.name === "session.stuck");
+    const longEv = invoke?.events.find((e) => e.name === "session.long_running");
+    expect(stuckEv?.attributes?.["weave.session.classification"]).toBe("stale_session_state");
+    expect(longEv?.attributes?.["weave.session.classification"]).toBe("long_running");
+    expect(longEv?.attributes?.["weave.session.age_ms"]).toBe(120_000);
+  });
 });

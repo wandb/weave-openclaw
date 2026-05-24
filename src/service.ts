@@ -918,6 +918,14 @@ export function createWeaveService(
       handleModelFailover(e, traceId);
       return;
     }
+    if (
+      eventType === "session.stalled" ||
+      eventType === "session.stuck" ||
+      eventType === "session.long_running"
+    ) {
+      handleSessionAttention(eventType, e);
+      return;
+    }
 
     const conversationIdHint = invokeAgents.sessionKeyForTrace(traceId);
 
@@ -1309,6 +1317,57 @@ export function createWeaveService(
     }
     if (e.suspended === true) attrs["weave.failover.suspended"] = true;
     span.addEvent("model.failover", attrs);
+  }
+
+  /**
+   * Three session-health signals share a payload shape (the
+   * SessionAttentionBase). They mean: this session is taking too long
+   * (long_running), is blocked / waiting on something (stalled), or its
+   * state record is stale (stuck). Stamping all three as span events on
+   * the active invoke_agent makes the unhealthy run visible in Weave's
+   * UI without inventing per-signal span types.
+   */
+  function handleSessionAttention(
+    eventName: string,
+    e: Record<string, unknown>,
+  ): void {
+    if (!invokeAgents) return;
+    const sessionKey = nonEmptyString(e.sessionKey);
+    if (!sessionKey) return;
+    const span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.classification === "string") {
+      attrs["weave.session.classification"] = e.classification;
+    }
+    if (typeof e.state === "string") attrs["weave.session.state"] = e.state;
+    if (typeof e.ageMs === "number" && Number.isFinite(e.ageMs)) {
+      attrs["weave.session.age_ms"] = Math.trunc(e.ageMs);
+    }
+    if (typeof e.queueDepth === "number" && Number.isFinite(e.queueDepth)) {
+      attrs["weave.session.queue_depth"] = Math.trunc(e.queueDepth);
+    }
+    if (typeof e.reason === "string") attrs["weave.session.reason"] = e.reason;
+    if (typeof e.activeWorkKind === "string") {
+      attrs["weave.session.active_work_kind"] = e.activeWorkKind;
+    }
+    if (typeof e.activeToolName === "string") attrs["gen_ai.tool.name"] = e.activeToolName;
+    if (typeof e.activeToolCallId === "string") {
+      attrs["gen_ai.tool.call.id"] = e.activeToolCallId;
+    }
+    if (typeof e.activeToolAgeMs === "number" && Number.isFinite(e.activeToolAgeMs)) {
+      attrs["weave.session.active_tool_age_ms"] = Math.trunc(e.activeToolAgeMs);
+    }
+    if (typeof e.lastProgressAgeMs === "number" && Number.isFinite(e.lastProgressAgeMs)) {
+      attrs["weave.session.last_progress_age_ms"] = Math.trunc(e.lastProgressAgeMs);
+    }
+    if (typeof e.lastProgressReason === "string") {
+      attrs["weave.session.last_progress_reason"] = e.lastProgressReason;
+    }
+    if (e.terminalProgressStale === true) {
+      attrs["weave.session.terminal_progress_stale"] = true;
+    }
+    span.addEvent(eventName, attrs);
   }
 
   async function teardownInternal(): Promise<void> {
