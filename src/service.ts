@@ -910,6 +910,14 @@ export function createWeaveService(
       handleMessageDeliveryError(e);
       return;
     }
+    // Cast through string for event types not yet in the SDK's published
+    // DiagnosticEventPayload union (this plugin runs against potentially
+    // newer gateways than the SDK snapshot in node_modules).
+    const eventType = event.type as string;
+    if (eventType === "model.failover") {
+      handleModelFailover(e, traceId);
+      return;
+    }
 
     const conversationIdHint = invokeAgents.sessionKeyForTrace(traceId);
 
@@ -1270,6 +1278,37 @@ export function createWeaveService(
     }
     if (typeof e.errorCategory === "string") attrs["error.type"] = e.errorCategory;
     span.addEvent("message.delivery.error", attrs);
+  }
+
+  /**
+   * `model.failover` fires mid-run when one provider hits an error/limit and
+   * the runtime falls back to the next provider in the cascade. The fallback
+   * chat span (next `model.call.started`) carries the new provider/model in
+   * its own attrs, so the failover detail belongs at the agent level —
+   * stamping on the active invoke_agent groups all retries for the run.
+   *
+   * Lookup priority: sessionKey if present (the canonical field on the
+   * event), then the trace's sticky sessionKey, then trace-level fallback.
+   */
+  function handleModelFailover(e: Record<string, unknown>, traceId: string): void {
+    if (!invokeAgents) return;
+    const sessionKey = nonEmptyString(e.sessionKey);
+    let span: Span | undefined;
+    if (sessionKey) span = invokeAgents.lookup({ by: "sessionKey", value: sessionKey });
+    if (!span) span = invokeAgents.lookup({ by: "traceId", value: traceId });
+    if (!span) return;
+    const attrs: Record<string, string | number | boolean> = {};
+    if (typeof e.fromProvider === "string") attrs["weave.failover.from_provider"] = e.fromProvider;
+    if (typeof e.fromModel === "string") attrs["weave.failover.from_model"] = e.fromModel;
+    if (typeof e.toProvider === "string") attrs["weave.failover.to_provider"] = e.toProvider;
+    if (typeof e.toModel === "string") attrs["weave.failover.to_model"] = e.toModel;
+    if (typeof e.reason === "string") attrs["weave.failover.reason"] = e.reason;
+    if (typeof e.lane === "string") attrs["weave.failover.lane"] = e.lane;
+    if (typeof e.cascadeDepth === "number" && Number.isFinite(e.cascadeDepth)) {
+      attrs["weave.failover.cascade_depth"] = Math.trunc(e.cascadeDepth);
+    }
+    if (e.suspended === true) attrs["weave.failover.suspended"] = true;
+    span.addEvent("model.failover", attrs);
   }
 
   async function teardownInternal(): Promise<void> {

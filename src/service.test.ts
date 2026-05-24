@@ -1590,4 +1590,53 @@ describe("createWeaveService (integration)", () => {
     expect(ev?.attributes?.["weave.message.success"]).toBe(false);
     expect(ev?.attributes?.["weave.message.error"]).toBe("transport-timeout");
   });
+
+  test("model.failover stamps a failover span event on the active invoke_agent", async () => {
+    const { service } = createWeaveService({
+      pluginConfig: { entity: "acme", project: "agents", agentName: "x" },
+    });
+    const ctx = makeCtx();
+    await service.start(ctx);
+
+    emitTrustedDiagnosticEvent({
+      type: "run.started",
+      runId: "r-fo",
+      harnessId: "x",
+      sessionKey: "conv-fo",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "model.failover",
+      sessionKey: "conv-fo",
+      fromProvider: "anthropic",
+      fromModel: "claude-opus-4.7",
+      toProvider: "openai",
+      toModel: "gpt-5.4",
+      reason: "rate_limit",
+      cascadeDepth: 1,
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    emitTrustedDiagnosticEvent({
+      type: "run.completed",
+      runId: "r-fo",
+      harnessId: "x",
+      durationMs: 90,
+      outcome: "completed",
+      trace: trace(ROOT_SPAN_ID),
+    } as never);
+    await flushAsyncDiagnostics();
+    await service.stop?.(ctx);
+
+    const invoke = _testExporter
+      .getFinishedSpans()
+      .find((s) => s.name.startsWith("invoke_agent"));
+    const ev = invoke?.events.find((e) => e.name === "model.failover");
+    expect(ev).toBeDefined();
+    expect(ev?.attributes?.["weave.failover.from_provider"]).toBe("anthropic");
+    expect(ev?.attributes?.["weave.failover.from_model"]).toBe("claude-opus-4.7");
+    expect(ev?.attributes?.["weave.failover.to_provider"]).toBe("openai");
+    expect(ev?.attributes?.["weave.failover.to_model"]).toBe("gpt-5.4");
+    expect(ev?.attributes?.["weave.failover.reason"]).toBe("rate_limit");
+    expect(ev?.attributes?.["weave.failover.cascade_depth"]).toBe(1);
+  });
 });
