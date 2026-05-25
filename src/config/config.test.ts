@@ -73,6 +73,45 @@ describe("resolveConfig", () => {
     expect(cfg.captureContent).toBe(false);
   });
 
+  it("defaults captureContent to true when omitted", async () => {
+    const cfg = await resolveConfig({ entity: "e", project: "p" });
+    expect(cfg.captureContent).toBe(true);
+  });
+
+  it("accepts captureContent v1-style object with enabled=true", async () => {
+    const cfg = await resolveConfig({
+      entity: "e",
+      project: "p",
+      captureContent: {
+        enabled: true,
+        inputMessages: true,
+        outputMessages: true,
+        toolArguments: true,
+        toolResults: true,
+        systemInstructions: true,
+      },
+    });
+    expect(cfg.captureContent).toBe(true);
+  });
+
+  it("treats captureContent object with enabled=false as off", async () => {
+    const cfg = await resolveConfig({
+      entity: "e",
+      project: "p",
+      captureContent: { enabled: false },
+    });
+    expect(cfg.captureContent).toBe(false);
+  });
+
+  it("treats captureContent object without enabled as on", async () => {
+    const cfg = await resolveConfig({
+      entity: "e",
+      project: "p",
+      captureContent: { inputMessages: true } as any,
+    });
+    expect(cfg.captureContent).toBe(true);
+  });
+
   it("clamps flushIntervalMs to a min of 1000", async () => {
     const cfg = await resolveConfig({ entity: "e", project: "p", flushIntervalMs: 200 });
     expect(cfg.flushIntervalMs).toBe(1000);

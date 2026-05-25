@@ -8,7 +8,7 @@ import { init as weaveInit, getWeaveTracer } from "weave";
 
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
-  const { createWeaveHookState } = await import("./hook-state.js");
+  const { createWeaveHookState } = await import("./state/hook-state.js");
   const hookState = createWeaveHookState();
   const plugin = createWeavePlugin({
     pluginConfig: { entity: "e", project: "p", apiKey: "k", ...extraConfig },
@@ -529,7 +529,7 @@ describe("tool lifecycle", () => {
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
     const { createWeavePlugin } = await import("./plugin.js");
-    const { createWeaveHookState } = await import("./hook-state.js");
+    const { createWeaveHookState } = await import("./state/hook-state.js");
     const hookState = createWeaveHookState();
     const plugin = createWeavePlugin({
       pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: false },

@@ -10,6 +10,21 @@ const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 const MIN_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 
+/**
+ * Granular sub-flags for `captureContent`. Accepted for compatibility with the
+ * v1 config shape (and the plugin manifest's configSchema, which still lists
+ * them). v2 honors `enabled` only; the per-field flags are recorded so the
+ * plugin can warn if someone tries to use them to selectively disable a field.
+ */
+export type RawCaptureContent = {
+  enabled?: boolean;
+  inputMessages?: boolean;
+  outputMessages?: boolean;
+  toolArguments?: boolean;
+  toolResults?: boolean;
+  systemInstructions?: boolean;
+};
+
 export type RawConfig = {
   enabled?: boolean;
   entity?: string;
@@ -18,7 +33,7 @@ export type RawConfig = {
   agentName?: string;
   agentVersion?: string;
   agentDescription?: string;
-  captureContent?: boolean | "on" | "off";
+  captureContent?: boolean | "on" | "off" | RawCaptureContent;
   flushIntervalMs?: number;
   stripSenderWrapper?: boolean;
   apiKey?: string | SecretRef;
@@ -52,12 +67,7 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
   }
   const project = nonEmpty(raw.project) ?? "openclaw-default";
 
-  const captureContent =
-    typeof raw.captureContent === "boolean"
-      ? raw.captureContent
-      : raw.captureContent === "off"
-        ? false
-        : true;
+  const captureContent = resolveCaptureContent(raw.captureContent);
 
   const apiKey = raw.apiKey ? await resolveApiKey(raw.apiKey) : undefined;
 
@@ -81,6 +91,25 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
     apiKey: apiKey?.value,
     authSource: apiKey?.source,
   };
+}
+
+/**
+ * Resolve `captureContent` to a single boolean. Defaults to `true` (capture
+ * on) so traces are useful out of the box. Accepted shapes:
+ *   - `true` / `"on"` / undefined  -> true
+ *   - `false` / `"off"`            -> false
+ *   - `{ enabled: false, ... }`    -> false (other sub-flags ignored in v2)
+ *   - any other object             -> true (treated as "capture on")
+ */
+function resolveCaptureContent(raw: RawConfig["captureContent"]): boolean {
+  if (raw === undefined) return true;
+  if (typeof raw === "boolean") return raw;
+  if (raw === "off") return false;
+  if (raw === "on") return true;
+  if (typeof raw === "object" && raw !== null) {
+    return raw.enabled !== false;
+  }
+  return true;
 }
 
 function resolveAgentVersion(raw: string | undefined): string {

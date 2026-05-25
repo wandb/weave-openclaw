@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { setBoundedMap } from "./bounded-map.js";
+import { setBoundedMap } from "../util/bounded-map.js";
 
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event

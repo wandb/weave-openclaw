@@ -12,17 +12,22 @@ import type { LLM, Session, SubAgent, Tool, Turn } from "weave";
 export const MAX_ENTRIES = 4096;
 
 /**
- * LLM handle with the merge-state needed for two-signal close: the
- * llm_output hook captures content while model.call.completed carries the
- * end time. Whichever fires second triggers .record(...).end().
+ * LLM handle for an in-flight chat span. We defer close until the parent
+ * `run.completed` arrives so we can attach the run-level `llm_output` content
+ * (OpenClaw fires `llm_output` once per attempt with all assistantTexts, not
+ * per model.call). `endTimeMs` is recorded when `model.call.completed` fires
+ * but `end()` is deferred to `closeRunChatSpans`.
  */
 export type LLMHandle = {
   llm: LLM;
-  hookDone: boolean;
-  diagDone: boolean;
   endTimeMs?: number;
   status: "ok" | "error";
   errorType?: string;
+};
+
+export type AssistantOutputBuffer = {
+  texts: string[];
+  usage?: unknown;
 };
 
 export type Registries = {
@@ -31,6 +36,10 @@ export type Registries = {
   calls: Map<string, LLMHandle>;
   tools: Map<string, Tool>;
   subagents: Map<string, SubAgent>;
+  /** Ordered callIds per runId. Used at run.completed to attach output texts. */
+  chatCallsByRun: Map<string, string[]>;
+  /** Assistant texts + usage captured at run scope by the llm_output hook. */
+  assistantOutputByRun: Map<string, AssistantOutputBuffer>;
 };
 
 export function createRegistries(): Registries {
@@ -40,5 +49,7 @@ export function createRegistries(): Registries {
     calls: new Map(),
     tools: new Map(),
     subagents: new Map(),
+    chatCallsByRun: new Map(),
+    assistantOutputByRun: new Map(),
   };
 }
