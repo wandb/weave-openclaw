@@ -5,10 +5,12 @@
 import type { HandlerDeps } from "../deps.js";
 
 /**
- * Turn-level annotations from hooks: `agent_end` stamps success/error/duration
- * on the Turn and emits an inline `agent_end_summary` event for timeline
- * views; `message_received` records inbound user/assistant traffic as a span
- * event on the active Turn.
+ * Turn-level annotations from hooks: `agent_end` stamps success/error/
+ * duration/final-message on the active Turn as attributes (the Turn already
+ * carries start/end timestamps, so a synthetic timeline event would be
+ * redundant — and an attribute is what the Agents tab needs to filter and
+ * search by); `message_received` records inbound user/assistant traffic
+ * as a span event on the active Turn.
  */
 export function createTurnHookHandlers(deps: HandlerDeps) {
   return {
@@ -22,17 +24,10 @@ export function createTurnHookHandlers(deps: HandlerDeps) {
       if (typeof event.durationMs === "number" && Number.isFinite(event.durationMs)) {
         turn.setAttribute("weave.agent.duration_ms", Math.trunc(event.durationMs));
       }
-      const evAttrs: Record<string, string | number | boolean> = {};
-      if (typeof event.success === "boolean") evAttrs["weave.agent.success"] = event.success;
-      if (event.error) evAttrs["weave.agent.error"] = String(event.error);
-      if (typeof event.durationMs === "number" && Number.isFinite(event.durationMs)) {
-        evAttrs["weave.agent.duration_ms"] = Math.trunc(event.durationMs);
-      }
       const resolved = deps.getResolved();
       if (resolved?.captureContent && event.lastAssistantMessage) {
-        evAttrs["weave.agent.final_message"] = String(event.lastAssistantMessage);
+        turn.setAttribute("weave.agent.final_message", String(event.lastAssistantMessage));
       }
-      turn.addEvent("agent_end_summary", evAttrs);
     },
 
     message_received(event: any): void {

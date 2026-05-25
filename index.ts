@@ -4,7 +4,7 @@
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { onInternalDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { getSharedWeaveHookState } from "./src/state/hook-state.js";
+import { createWeaveHookState } from "./src/state/hook-state.js";
 import { createWeavePlugin, renderStatus, type WeavePlugin } from "./src/plugin.js";
 
 // OpenClaw's loader can invoke `register(api)` multiple times for the same
@@ -13,9 +13,8 @@ import { createWeavePlugin, renderStatus, type WeavePlugin } from "./src/plugin.
 // (not module scope — a module re-import would create a fresh module and
 // hand out a fresh plugin instance with empty registries, while the old
 // instance's diagnostic listener would still be live but holding stale
-// state). The shared hookState already follows this pattern; the registries
-// (Turn/Call/Tool maps) live on the plugin instance, so the instance itself
-// must be shared too.
+// state). The plugin instance owns its hookState; one singleton entry on
+// globalThis covers both.
 const PLUGIN_GLOBAL_KEY = Symbol.for("weave-openclaw.plugin.v1");
 const DIAGNOSTIC_SUBSCRIBED_KEY = Symbol.for("weave-openclaw.diagnosticSubscribed.v1");
 
@@ -23,8 +22,7 @@ function getOrCreateSharedPlugin(pluginConfig: unknown): WeavePlugin {
   const g = globalThis as Record<PropertyKey, unknown>;
   const cached = g[PLUGIN_GLOBAL_KEY] as WeavePlugin | undefined;
   if (cached) return cached;
-  const hookState = getSharedWeaveHookState();
-  const plugin = createWeavePlugin({ pluginConfig, hookState });
+  const plugin = createWeavePlugin({ pluginConfig, hookState: createWeaveHookState() });
   Object.defineProperty(g, PLUGIN_GLOBAL_KEY, {
     value: plugin,
     writable: false,

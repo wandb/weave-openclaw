@@ -79,33 +79,6 @@ export function createWeaveHookState(): WeaveHookState {
 }
 
 /**
- * Returns the singleton hook state, lazily initializing it on first call.
- *
- * OpenClaw can invoke `register(api)` multiple times during a single gateway
- * lifecycle (discovery + runtime, hot-reload, plugin re-registration) and
- * each call would otherwise create its own closure-captured `hookState`,
- * leaving hook handlers and the service pointing at different Map instances.
- * Routing through `globalThis[Symbol.for(...)]` matches what core does for
- * its own diagnostic-event bus and ensures every registration in the same
- * process shares the same state.
- */
-const HOOK_STATE_GLOBAL_KEY = Symbol.for("weave-openclaw.hookState.v1");
-
-export function getSharedWeaveHookState(): WeaveHookState {
-  const g = globalThis as Record<PropertyKey, unknown>;
-  const existing = g[HOOK_STATE_GLOBAL_KEY] as WeaveHookState | undefined;
-  if (existing && existing.llmInputs instanceof Map) return existing;
-  const fresh = createWeaveHookState();
-  Object.defineProperty(g, HOOK_STATE_GLOBAL_KEY, {
-    value: fresh,
-    writable: false,
-    configurable: true,
-    enumerable: false,
-  });
-  return fresh;
-}
-
-/**
  * Record the in-flight callId for a runId. Called from the
  * `model_call_started` hook so subsequent llm_input/llm_output captures (which
  * lack callId) can stamp themselves with the correct id.

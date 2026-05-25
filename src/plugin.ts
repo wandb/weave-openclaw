@@ -9,7 +9,7 @@ import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/con
 import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
-import type { HandlerDeps } from "./handlers/deps.js";
+import type { HandlerDeps, HandlerLogger } from "./handlers/deps.js";
 import { createSessionHookHandlers } from "./handlers/hooks/session.js";
 import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
 import { createToolHookHandlers } from "./handlers/hooks/tool.js";
@@ -45,11 +45,13 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let startedAt: number | undefined;
   const costByRun = new Map<string, number>();
   const pendingCompactionByRun = new Map<string, { itemsBefore: number }>();
+  let logger: HandlerLogger | undefined;
 
   const deps: HandlerDeps = {
     registries,
     hookState: params.hookState,
     getResolved: () => resolved,
+    getLogger: () => logger,
     costByRun,
     pendingCompactionByRun,
   };
@@ -57,6 +59,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   const service: OpenClawPluginService = {
     id: "weave",
     async start(ctx) {
+      logger = ctx.logger;
       // If start() is called without a prior stop(), drop accumulated state.
       if (lifecycle === "running") {
         registries.sessions.clear();
@@ -66,6 +69,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         registries.subagents.clear();
         registries.chatCallsByRun.clear();
         registries.assistantOutputByRun.clear();
+        costByRun.clear();
+        pendingCompactionByRun.clear();
       }
       resolved = undefined;
       startedAt = undefined;
@@ -139,6 +144,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       registries.subagents.clear();
       registries.chatCallsByRun.clear();
       registries.assistantOutputByRun.clear();
+      costByRun.clear();
+      pendingCompactionByRun.clear();
     },
   };
 

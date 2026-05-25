@@ -6,16 +6,21 @@ import type { ResolvedConfig } from "../config/config.js";
 import type { WeaveHookState } from "../state/hook-state.js";
 import type { Registries } from "../state/registries.js";
 
+export type HandlerLogger = {
+  warn(msg: string): void;
+};
+
 /**
- * Shared dependencies passed to every handler factory. `getResolved` is a
- * getter (not a value) because the config is assigned after `start()` runs;
- * handlers are constructed once at plugin-creation time but must observe the
- * latest value.
+ * Shared dependencies passed to every handler factory. `getResolved` and
+ * `getLogger` are getters (not values) because both are assigned after
+ * `start()` runs; handlers are constructed once at plugin-creation time but
+ * must observe the latest values.
  */
 export type HandlerDeps = {
   registries: Registries;
   hookState: WeaveHookState;
   getResolved: () => ResolvedConfig | undefined;
+  getLogger: () => HandlerLogger | undefined;
   /** Cumulative cost per runId. Owned here so onModelUsage and onRunFinalize share it. */
   costByRun: Map<string, number>;
   /** Compaction state captured by before_compaction, consumed by after_compaction. */

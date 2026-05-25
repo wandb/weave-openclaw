@@ -33,6 +33,18 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
   const texts = output?.texts ?? [];
   const usage = toUsage(output?.usage);
 
+  // Length mismatch is a load-bearing assumption that the runtime fires
+  // exactly one llm_output text per model.call we tracked. Warn loud so we
+  // notice drift in production rather than silently mis-attributing.
+  if (texts.length > 0 && texts.length !== callIds.length) {
+    deps.getLogger()?.warn(
+      `weave: llm_output text count (${texts.length}) did not match tracked ` +
+        `chat-span count (${callIds.length}) for runId=${runId}; surplus texts ` +
+        `will be folded into the last chat span. If this fires for real traffic, ` +
+        `the positional attribution in closeRunChatSpans needs an upstream fix.`,
+    );
+  }
+
   for (let i = 0; i < callIds.length; i++) {
     const callId = callIds[i]!;
     const h = deps.registries.calls.get(callId);
@@ -40,15 +52,20 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
     const isLast = i === callIds.length - 1;
     const capIn = deps.hookState.llmInputs.get(callId);
     // Positional attribution: i-th chat span gets the i-th assistant text.
-    // If the model emitted more texts than tracked chat spans (shouldn't
-    // happen, but be defensive), fold the surplus into the final span so
-    // the user-visible answer never silently disappears.
-    const text =
-      i < texts.length
-        ? texts[i]
-        : isLast && texts.length > 0
-          ? texts[texts.length - 1]
-          : undefined;
+    // When lengths don't match we fall back to behavior that preserves the
+    // user-visible answer, and the warn above flags it:
+    //   - Surplus (N > M): last span absorbs texts[M-1..N-1] joined.
+    //   - Scarcity (N < M): last span pads with texts[N-1] so the answer
+    //     still appears on at least one span when the runtime aggregated
+    //     everything into fewer texts than we tracked spans.
+    let text: string | undefined;
+    if (isLast && texts.length > callIds.length) {
+      text = texts.slice(callIds.length - 1).join("\n");
+    } else if (i < texts.length) {
+      text = texts[i];
+    } else if (isLast && texts.length > 0) {
+      text = texts[texts.length - 1];
+    }
     const shaped = shapeMessages({ input: capIn, text }, captureContent);
     const recordUsage = isLast ? usage : undefined;
     if (shaped.input.length || shaped.output.length || recordUsage) {

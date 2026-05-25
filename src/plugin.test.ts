@@ -731,7 +731,7 @@ describe("side-channel attrs on Turn", () => {
     expect(ev?.attributes?.["weave.message.content"]).toBe("hello");
   });
 
-  it("agent_end also adds agent_end_summary span event", async () => {
+  it("agent_end stamps final_message as a Turn attribute (not a duplicate event) when content capture is on", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.hook("agent_end", {
       runId: "r",
@@ -741,11 +741,14 @@ describe("side-channel attrs on Turn", () => {
     });
     await endRun(dispatch, finish);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
-    const ev = turn?.events.find(e => e.name === "agent_end_summary");
-    expect(ev).toBeDefined();
-    expect(ev?.attributes?.["weave.agent.success"]).toBe(true);
-    expect(ev?.attributes?.["weave.agent.duration_ms"]).toBe(1200);
-    expect(ev?.attributes?.["weave.agent.final_message"]).toBe("all done");
+    // The agent_end_summary event was removed — its data is redundant with
+    // the Turn's own start/end timestamps and the attributes set below.
+    // Agents-tab filters and search need these on the span, not as a
+    // synthetic timeline event.
+    expect(turn?.events.find(e => e.name === "agent_end_summary")).toBeUndefined();
+    expect(turn?.attributes["weave.agent.success"]).toBe(true);
+    expect(turn?.attributes["weave.agent.duration_ms"]).toBe(1200);
+    expect(turn?.attributes["weave.agent.final_message"]).toBe("all done");
   });
 });
 
@@ -847,5 +850,174 @@ describe("subagent and compaction", () => {
     const ev = turn?.events.find(e => e.name === "context_compacted");
     expect(ev?.attributes?.["items_before"]).toBe(40);
     expect(ev?.attributes?.["items_after"]).toBe(10);
+  });
+});
+
+// Targeted regression tests for the design-pressure points Tim flagged in
+// the v2 PR review (#9). Concurrent-runs and hot-reload exercise the
+// ambient-state and lifecycle invariants the rest of the suite assumes.
+// Surplus-text covers the closeRunChatSpans fallback that was previously
+// silent.
+describe("concurrent runs", () => {
+  it("two interleaved runs each get their own Turn / LLM / Tool spans without colliding on the SDK's ambient state", async () => {
+    const { plugin, dispatch, finish } = await bootPlugin();
+
+    // Interleave events for two concurrent runs. Each `runIsolated()`
+    // boundary in the handlers must let both runs' SDK constructions
+    // succeed; without it the second startTurn would throw "X is already
+    // active in this async chain."
+    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-A", sessionKey: "s-A",
+      trace: { traceId: "ta", spanId: "spa" } });
+    dispatch.diagnostic({ type: "run.started", ts: 1010, runId: "r-B", sessionKey: "s-B",
+      trace: { traceId: "tb", spanId: "spb" } });
+    expect(plugin.registries.turns.has("r-A")).toBe(true);
+    expect(plugin.registries.turns.has("r-B")).toBe(true);
+
+    dispatch.hook("model_call_started", { runId: "r-A", callId: "c-A" });
+    dispatch.hook("model_call_started", { runId: "r-B", callId: "c-B" });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r-A", callId: "c-A",
+      model: "gpt-4o", trace: { traceId: "ta", spanId: "csa", parentSpanId: "spa" } });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1110, runId: "r-B", callId: "c-B",
+      model: "gpt-4o", trace: { traceId: "tb", spanId: "csb", parentSpanId: "spb" } });
+    expect(plugin.registries.calls.has("c-A")).toBe(true);
+    expect(plugin.registries.calls.has("c-B")).toBe(true);
+
+    dispatch.hook("llm_input", { runId: "r-A", prompt: "from A" });
+    dispatch.hook("llm_input", { runId: "r-B", prompt: "from B" });
+    dispatch.hook("llm_output", { runId: "r-A", assistantTexts: ["A answered"], usage: { input: 1, output: 1 } });
+    dispatch.hook("llm_output", { runId: "r-B", assistantTexts: ["B answered"], usage: { input: 2, output: 2 } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1200, runId: "r-A", callId: "c-A",
+      trace: { traceId: "ta", spanId: "csa" } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1210, runId: "r-B", callId: "c-B",
+      trace: { traceId: "tb", spanId: "csb" } });
+
+    dispatch.diagnostic({ type: "run.completed", ts: 1500, runId: "r-A", sessionKey: "s-A",
+      trace: { traceId: "ta", spanId: "spa" }, outcome: "completed" });
+    dispatch.diagnostic({ type: "run.completed", ts: 1510, runId: "r-B", sessionKey: "s-B",
+      trace: { traceId: "tb", spanId: "spb" }, outcome: "completed" });
+    await finish();
+
+    const spans = exporter.getFinishedSpans();
+    const turns = spans.filter(s => s.name === "invoke_agent");
+    const chats = spans.filter(s => s.name === "chat");
+    expect(turns.length).toBe(2);
+    expect(chats.length).toBe(2);
+    // Each chat's input/output stayed attached to its own run.
+    const aChat = chats.find(s => String(s.attributes["gen_ai.input.messages"] ?? "").includes("from A"));
+    const bChat = chats.find(s => String(s.attributes["gen_ai.input.messages"] ?? "").includes("from B"));
+    expect(aChat).toBeDefined();
+    expect(bChat).toBeDefined();
+    expect(String(aChat?.attributes["gen_ai.output.messages"])).toContain("A answered");
+    expect(String(bChat?.attributes["gen_ai.output.messages"])).toContain("B answered");
+  });
+});
+
+describe("hot-reload / lifecycle", () => {
+  it("start() called twice without an intervening stop() drops accumulated per-run state from the previous start", async () => {
+    const { plugin, dispatch } = await bootPlugin();
+    // Open some state under the first start().
+    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-1", sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" } });
+    dispatch.hook("session_start", { sessionKey: "s" });
+    dispatch.diagnostic({ type: "model.usage", ts: 1100, runId: "r-1", costUsd: 0.42,
+      trace: { traceId: "t", spanId: "sp" } });
+    expect(plugin.registries.turns.size).toBeGreaterThan(0);
+
+    // Second start() with no stop() in between — simulates plugin
+    // re-registration or hot-reload. All per-run registries plus cost /
+    // compaction accumulators must reset, otherwise leaked state from the
+    // previous lifecycle leaks into the next.
+    await plugin.service.start({ logger: makeLogger() } as any);
+    expect(plugin.registries.turns.size).toBe(0);
+    expect(plugin.registries.sessions.size).toBe(0);
+    expect(plugin.registries.calls.size).toBe(0);
+    expect(plugin.registries.tools.size).toBe(0);
+    expect(plugin.registries.subagents.size).toBe(0);
+    expect(plugin.registries.chatCallsByRun.size).toBe(0);
+    expect(plugin.registries.assistantOutputByRun.size).toBe(0);
+
+    await plugin.service.stop({ logger: makeLogger() } as any);
+  });
+});
+
+describe("closeRunChatSpans surplus / scarcity attribution", () => {
+  async function multiCallRun(textsFromOutput: string[]): Promise<typeof exporter.getFinishedSpans extends () => infer R ? R : never> {
+    const { dispatch, finish } = await bootPlugin();
+    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" } });
+    // Two model calls -> two chat spans tracked.
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1",
+      model: "gpt-4o", trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1",
+      trace: { traceId: "t", spanId: "cs1" } });
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-2" });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1200, runId: "r", callId: "c-2",
+      model: "gpt-4o", trace: { traceId: "t", spanId: "cs2", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1250, runId: "r", callId: "c-2",
+      trace: { traceId: "t", spanId: "cs2" } });
+    // llm_output fires once with the given texts (we vary length to trigger
+    // surplus / scarcity / exact-match).
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: textsFromOutput });
+    dispatch.diagnostic({ type: "run.completed", ts: 1500, runId: "r", sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" }, outcome: "completed" });
+    await finish();
+    return exporter.getFinishedSpans();
+  }
+
+  it("surplus: when llm_output carries more texts than tracked chat spans, the last span absorbs the trailing texts joined", async () => {
+    const spans = await multiCallRun(["call-1-text", "call-2-text", "trailing-overflow"]);
+    const chats = spans.filter(s => s.name === "chat");
+    expect(chats.length).toBe(2);
+    const outputs = chats.map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
+    // First chat gets the first text.
+    expect(outputs[0]).toContain("call-1-text");
+    expect(outputs[0]).not.toContain("trailing-overflow");
+    // Last chat absorbs texts[1] + texts[2] joined so the user-visible
+    // answer is preserved rather than silently dropped.
+    expect(outputs[1]).toContain("call-2-text");
+    expect(outputs[1]).toContain("trailing-overflow");
+  });
+
+  it("scarcity: when llm_output carries fewer texts than tracked chat spans, the last span pads with the last available text", async () => {
+    const spans = await multiCallRun(["only-text"]);
+    const chats = spans.filter(s => s.name === "chat");
+    expect(chats.length).toBe(2);
+    const outputs = chats.map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
+    // First chat gets text[0].
+    expect(outputs[0]).toContain("only-text");
+    // Last chat pads with the last available text (positional fall-through),
+    // so the answer still shows on at least one span.
+    expect(outputs[1]).toContain("only-text");
+  });
+
+  it("logs a warn when the runtime's llm_output text count drifts from the tracked chat-span count", async () => {
+    // Capture the logger passed into service.start.
+    const log = makeLogger();
+    const { createWeavePlugin } = await import("./plugin.js");
+    const { createWeaveHookState } = await import("./state/hook-state.js");
+    const plugin = createWeavePlugin({
+      pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: true },
+      hookState: createWeaveHookState(),
+    });
+    await plugin.service.start({ logger: log } as any);
+    const d = plugin.handlers.diagnostic!;
+    const h = plugin.handlers.hook;
+    d({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" } }, { trusted: true });
+    h.model_call_started!({ runId: "r", callId: "c-1" });
+    d({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o",
+      trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } }, { trusted: true });
+    d({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1",
+      trace: { traceId: "t", spanId: "cs1" } }, { trusted: true });
+    // Two texts, only one chat span tracked.
+    h.llm_output!({ runId: "r", assistantTexts: ["a", "b"] });
+    d({ type: "run.completed", ts: 1300, runId: "r", sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" }, outcome: "completed" }, { trusted: true });
+    await plugin.service.stop({ logger: log } as any);
+
+    const warnCalls = (log.warn as any).mock.calls.map((c: any[]) => String(c[0]));
+    const mismatchWarn = warnCalls.find((m: string) => m.includes("did not match tracked chat-span count"));
+    expect(mismatchWarn).toBeDefined();
   });
 });
