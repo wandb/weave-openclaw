@@ -89,40 +89,10 @@ Full configuration with every option:
           agentName: "my-agent",
           agentVersion: "v1.0",
           agentDescription: "What my agent does.",
-          // ON by default. By the time you've granted entity/project,
-          // exported WANDB_API_KEY, and flipped allowConversationAccess
-          // above, you've consented to W&B receiving conversation data,
-          // making the plugin useless out-of-the-box for the sake of a
-          // fifth gate would be theater. Set { enabled: false } for a
-          // hard off (compliance / retention policy), or flip individual
-          // sub-flags for granular opt-out (each defaults to true; only
-          // explicit false disables). All captured strings pass through
-          // OpenClaw's redactSensitiveText before emission.
-          captureContent: {
-            enabled: true,
-            inputMessages: true,
-            outputMessages: true,
-            toolArguments: true,
-            toolResults: true,
-            systemInstructions: true,
-          },
-          // Optional. Strip OpenClaw's metadata-wrapper prefix
-          // (`Conversation info` / `Sender (untrusted metadata)` /
-          // `[timestamp]`) from user messages. Applies to both
-          // `historyMessages` and the in-flight prompt.
-          //
-          // Default false. Raw matches OTel `gen_ai.input.messages`
-          // semantics (store what the LLM actually saw), which is
-          // also what Phoenix, Helicone, LangSmith, Langfuse, and
-          // OpenLLMetry do. Keeping the wrapper also preserves
-          // prompt-injection visibility (an attacker who sneaks
-          // text into wrapper fields appears verbatim in the
-          // trace) and surfaces wrapper-format bugs in OpenClaw
-          // itself.
-          //
-          // Set true to strip for a cleaner Weave Agents-tab chat
-          // view, at the cost of fidelity and OTel conformance.
-          stripSenderWrapper: false,
+          // ON by default. Pass `false` or `"off"` for a hard off
+          // (compliance / retention policy). Plugin does NOT redact
+          // captured strings — scrub upstream if needed.
+          captureContent: true,
           flushIntervalMs: 5000,
         },
       },
@@ -198,40 +168,31 @@ post-v1.36.0 registry mainline:
 | OpenClaw event | Weave span / signal | Key attributes |
 |---|---|---|
 | `run.{started,completed}` (from `pi-embedded-runner/run/attempt.ts`) | `invoke_agent <agent>` | `gen_ai.operation.name=invoke_agent`, `gen_ai.agent.name`, `weave.agent.{id,version,description}`, `gen_ai.conversation.id`, `weave.outcome`, `weave.cost.usd` (cumulative across calls in the run) |
-| `model.call.{started,completed,error}` | `chat <model>` | `gen_ai.operation.name=chat`, `gen_ai.request.model`, `weave.request.{temperature,top_p,top_k,max_tokens,seed,stop_sequences,frequency_penalty,presence_penalty,choice.count}`, `gen_ai.response.model`, `weave.response.id`, `gen_ai.usage.{input,output}_tokens`, `gen_ai.usage.reasoning.output_tokens`, `gen_ai.usage.cache_{read,creation}.input_tokens`, `weave.latency.time_to_first_byte_ms`, `gen_ai.output.type` |
-| `tool.execution.{started,completed,error,blocked}` | `execute_tool <tool>` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `weave.tool.{type,description}`, `weave.tool.denied_reason`, `weave.tool.block.reason` |
+| `model.call.{started,completed,error}` | `chat <model>` | `gen_ai.operation.name=chat`, `gen_ai.request.model`, `gen_ai.usage.{input,output}_tokens` (when surfaced via `llm_output`) |
+| `tool.execution.{started,completed,error,blocked}` | `execute_tool <tool>` | `gen_ai.operation.name=execute_tool`, `gen_ai.tool.name`, `gen_ai.tool.call.id` |
 | `model.usage` | (no new span) | Adds cumulative `weave.cost.usd`, `weave.usage.total.{input,output,tokens,cache_read.input,cache_creation.input}_tokens`, `weave.context.{budget,used}_tokens` to the active `invoke_agent` span. |
 | `tool.loop` | (no new span) | Adds a `tool.loop` span event on the active `invoke_agent` with `weave.loop.{level,detector,count,action,message,paired_tool_name}` and `gen_ai.tool.name`. |
-| `before_compaction` + `after_compaction` (hooks) | `context_compacted` | `weave.operation.name=context_compacted`, `weave.compaction.{items_before,items_after,summary}`. (The compaction operation name stays on `weave.*` because `context_compacted` is not a member of OTel's `gen_ai.operation.name` enum.) |
-| `subagent_spawned` + `subagent_ended` (hooks) | child `invoke_agent <agentId>` | Parented under the requester's invoke_agent for hierarchy in the Agents tab. `weave.subagent.{mode,outcome}`. |
+| `before_compaction` + `after_compaction` (hooks) | (no new span) | Adds a `context_compacted` span event on the active `invoke_agent` Turn with `items_before`, `items_after`, `tokens`. |
+| `subagent_spawned` + `subagent_ended` (hooks) | child `subagent` span | Parented under the requester's invoke_agent for hierarchy in the Agents tab. Subagent metadata (`weave.agent.id`, `weave.subagent.mode`, `weave.agent.description`, `gen_ai.conversation.id`) is stamped on a `subagent_spawned` event on the parent Turn because the SDK's `SubAgent` handle does not currently expose an enrichment surface. |
 | `context.assembled` | (no new span) | Adds `weave.context.{message_count,history_text_chars,history_image_blocks,system_prompt_chars,prompt_chars,prompt_images,budget_tokens,reserve_tokens}` to the active `invoke_agent`. |
-| `agent_end` (hook) | (no new span) | Adds an `agent_end_summary` span event on the active `invoke_agent` with `weave.agent.{success,duration_ms,error}` (and `weave.agent.final_message` when content capture is enabled). |
+| `agent_end` (hook) | (no new span) | Stamps `weave.agent.{success,duration_ms,error}` as attributes on the active `invoke_agent` Turn (and `weave.agent.final_message` when content capture is enabled). |
 | `run.attempt` | (no new span) | Adds a `run_attempt` span event on the active `invoke_agent` with `weave.run.attempt` (the attempt number) for retry visibility. |
 | `message_received` (hook) | (no new span) | Adds a `message_received` span event capturing `weave.message.{from,channel}` (and `weave.message.content` when content capture is enabled). Surfaces the trigger inline in the trace. |
-| `session_start` / `session_end` (hooks) | (no new span) | Adds `session_started` / `session_ended` span events with `weave.session.{reason,resumed_from,duration_ms,message_count}`. `session_started` is buffered until the next matching invoke_agent starts; `session_ended` is best-effort (only stamped if a run is still active). |
+| `session_start` / `session_end` (hooks) | `Session` handle | Opens a Weave `Session` keyed by `sessionKey` on `session_start`; subsequent `run.started` events for that sessionKey use it as the parent. `session_end` closes the handle. |
 
-When `captureContent.*` flags are on, we additionally emit (with redaction
-via OpenClaw's `redactSensitiveText`):
+When `captureContent` is on (the default), the plugin additionally emits:
 
-- `gen_ai.input.messages` (JSON-stringified message array)
-- `gen_ai.output.messages` (JSON-stringified)
-- `gen_ai.system_instructions` (string)
-- `weave.reasoning_content` (concatenated thinking/reasoning content from
-  Anthropic-style `lastAssistant.content` parts; no `gen_ai.*` counterpart)
-- `gen_ai.tool.call.arguments` (JSON-stringified)
-- `gen_ai.tool.call.result` (JSON-stringified)
+- `gen_ai.input.messages` (system + history + user prompt, as the SDK's
+  `LLM.record({ inputMessages })` payload)
+- `gen_ai.output.messages` (assistant text, as the SDK's
+  `LLM.record({ outputMessages })` payload)
+- `gen_ai.tool.call.arguments` (JSON-stringified, stamped on the `Tool` handle)
+- `gen_ai.tool.call.result` (JSON-stringified, stamped on the `Tool` handle)
 
-Each content attribute is clamped to 8 KiB. When the clamp triggers, a
-sibling boolean is emitted alongside (e.g. `gen_ai.input.messages.truncated:
-true`) so dashboards can filter for truncated traces without string-matching
-the inline `…[truncated Nc]` marker.
-
-> Content emission is best-effort: it depends on the underlying diagnostic
-> events carrying `inputMessages`/`outputMessages`/`toolInput`/`toolOutput`/
-> `systemPrompt` fields, plus the `llm_input`/`llm_output` hook captures.
-> The public `DiagnosticEventPayload` type does not declare these, but the
-> runtime payload may carry them. We follow the same pattern as the bundled
-> `diagnostics-otel` plugin.
+Content is emitted raw — the v1 redaction layer was removed in v2 in favor
+of upstream scrubbing. Operators with PII/PHI constraints should redact in
+the agent runtime before content reaches the diagnostic event stream, or
+turn `captureContent` off.
 
 ## Resource attributes
 
@@ -247,33 +208,26 @@ the SDK.
 
 ## Design notes
 
-- **Transport via the Weave Node SDK.** `weave.init()` + `getWeaveTracer()`
-  own provider, processor, exporter, auth, endpoint, and resource
-  attributes. The plugin focuses on event-to-span translation, content
-  capture, and concurrent-run-safe state management.
-- **Per-run state, not async-context.** OpenClaw runs agents concurrently on
-  per-session lanes, with fire-and-forget parallel hook dispatch. The SDK's
-  high-level `startTurn` / `startLLM` APIs use a process-wide-default
-  AsyncLocalStorage state that is single-flight and unsafe for this plugin;
-  we use `getWeaveTracer()` directly and key our own per-run span registry
-  by OpenClaw `spanId`.
+- **Transport via the Weave Node SDK.** `weave.init()` owns the provider,
+  batch processor, OTLP exporter, auth, endpoint resolution, and resource
+  attributes. The plugin owns event-to-span translation and per-run state.
+- **Per-run state via SDK handles.** Each `Session` / `Turn` / `LLM` /
+  `Tool` / `SubAgent` returned by the SDK is stored in a Map keyed by the
+  upstream OpenClaw id (`sessionKey`, `runId`, `callId`, `toolCallId`).
+  Finalize events look up the handle and call `.end()` on it.
+- **Concurrent runs.** OpenClaw runs agents concurrently on per-session
+  lanes. The SDK's `start*` factories install ambient state via
+  AsyncLocalStorage that is single-flight per async chain; the plugin
+  wraps each SDK construction in `runIsolated()` so concurrent runs do
+  not collide on the ambient state.
 - **Trusted events only.** We filter on `meta.trusted === true` before
-  emitting any span; adversarial event sources are dropped.
-- **Span correlation by OpenClaw spanId.** We store active spans in a
-  `Map<openclawSpanId, otelSpan>` keyed by `evt.trace.spanId` so we can
-  match `started` → `completed` events and resolve parents from
-  `evt.trace.parentSpanId`.
-- **Per-call hook state.** `llm_input`/`llm_output` captures key by `callId`
-  (resolved via `model_call_started`) so multi-call agent loops attribute
-  prompts/completions to the correct chat span instead of overwriting each
-  other under a shared `runId`.
-- **Bounded attribute payloads.** Every string attribute is run through
-  `redactSensitiveText` and clamped to 8 KiB. JSON content is also array-trimmed.
-- **Side-channel buffering.** `model.usage` and `tool.loop` events dispatch
-  synchronously while `model.call.*` and `tool.execution.*` are async-queued,
-  so they can race ahead of the invoke_agent span. The plugin buffers cost /
-  loop data by traceId and replays it when the invoke_agent span starts.
-- **No content emission unless explicitly opted in** via `captureContent.*`.
+  acting on any diagnostic event.
+- **`llm_input` is per-call, `llm_output` is per-attempt.** `llm_input`
+  arrives with a callId via `model_call_started` and is captured under the
+  callId-keyed bucket. `llm_output` fires once per attempt with all
+  assistant texts; `closeRunChatSpans` (called from `run.completed`)
+  attributes texts to each chat span positionally.
+- **No content emission unless `captureContent` is on** (default: on).
 
 ## Capabilities
 
@@ -315,54 +269,30 @@ arrive through `run.completed` with `outcome: "error"`.
 
 - **SDK preflight.** At plugin load time the plugin verifies the host
   OpenClaw exposes `api.on` and `api.registerService`; if not, it logs a
-  clear "incompatible plugin SDK; requires pluginApi >=2026.4.25" and
-  refuses to load instead of crashing later with `undefined is not a
-  function`.
-- **Failure-isolation.** Mapper exceptions inside `handleEvent` are caught
-  and rate-limited per event type, so a malformed event class can't flood
-  logs.
-- **API key hygiene.** Error messages logged via `ctx.logger` are scrubbed
-  for `Authorization: Basic ...`, `wandb-api-key`, and `api_key`/`api-key`
-  values before emission.
+  clear message and refuses to load instead of crashing later with
+  `undefined is not a function`.
+- **Bounded per-run state.** Each registry Map is FIFO-evicted at 4096
+  entries to defend against unbounded growth from interrupted event
+  streams (gateway crash mid-session, dropped conversation).
 
-## Limitations (v1)
+## Limitations
 
 - Tool calls render as raw JSON in Weave's UI (Weave-side limit for
   OTel-emitted tool spans).
-- Spans for events emitted before this plugin's subscription registers
-  (e.g. very early gateway startup) are dropped.
-- No metrics emitted (planned: `gen_ai.client.token.usage` /
+- No metrics emitted (e.g. `gen_ai.client.token.usage` /
   `gen_ai.client.operation.duration` histograms). Weave Agents tab doesn't
-  surface metrics; deferred until multi-vendor/Grafana use case appears.
+  surface metrics yet; deferred until that surface exists.
 - Streaming per-chunk timing (`time_to_first_chunk`, per-token latency)
-  isn't yet available — `time_to_first_byte_ms` is captured.
-- **`weave.tool.definitions` deferred:** OpenClaw's plugin SDK currently
-  exposes no hook that carries the resolved tool list. Will land once
-  upstream support exists.
-- `weave.cost.*`, `weave.tool.block.reason`, `weave.usage.total.*`,
-  `weave.loop.*`, `weave.context.*`, and `weave.subagent.*` are extensions
-  beyond Weave's documented Agents semconv. They land in the trace
-  server's `custom_attrs_*` maps and remain queryable, but won't get
-  dedicated columns until the schema absorbs them.
-
-## Debug logging
-
-`OPENCLAW_WEAVE_DEBUG` is comma-separated. Recognised flags:
-
-- `spans` — log every span creation (`name`, `traceId`, `spanId`,
-  `parentSpanId`, `parentResolved`) and every orphan drop. Useful when
-  Weave's Agents tab shows tool/chat spans as separate "turns" instead
-  of nested under their `invoke_agent` — the log tells you whether the
-  parent linkage is failing.
-- `trace-tree` — after every span start/finalize, dump the full set of
-  currently-active spans grouped by `traceId` with parent-child
-  indentation. Shows whether the tree shape is correct (one
-  `invoke_agent` with `chat`/`execute_tool` descendants) or wrong
-  (siblings, duplicates, orphans). Combine with `spans` for full
-  diagnosis: `OPENCLAW_WEAVE_DEBUG=spans,trace-tree`.
-
-Logs go through `ctx.logger.debug` (falls back to `.info` if the host
-logger doesn't have `.debug`). The API key is never logged.
+  isn't yet captured.
+- Subagent metadata is currently stamped as a `subagent_spawned` event on
+  the parent Turn rather than on the subagent's own span, because the
+  Weave Node SDK's `SubAgent` handle does not expose an enrichment surface
+  (`setAttribute` / `addEvent`). Will move to the subagent span once
+  upstream support lands.
+- `weave.*` attributes for cost, usage totals, loop detection, context
+  sizing, and run-attempt are plugin extensions beyond Weave's documented
+  Agents semconv. They land in the trace server's `custom_attrs_*` maps
+  and remain queryable but do not yet have dedicated columns.
 
 ## Troubleshooting
 
@@ -418,14 +348,6 @@ Export failure logging is now owned by the Weave Node SDK. Common shapes:
 | 401 / 403 from `trace.wandb.ai` | Invalid or scope-limited API key | Verify the key is current; confirm the team owns the entity/project. Run `wandb login` to refresh `~/.netrc`. |
 | 404 from the agents endpoint | Wrong base or trace-server URL | For dedicated installs, set `WANDB_BASE_URL` to your install host. For self-managed / proxy, set `WF_TRACE_SERVER_URL` to the trace-server URL. |
 | Connection refused / DNS error | DNS, proxy, or firewall | Confirm the gateway host can reach `trace.wandb.ai` (cloud) or your install host (dedicated) on 443. |
-
-### Need more detail
-
-Set `OPENCLAW_WEAVE_DEBUG=spans,trace-tree` in the gateway environment
-to get per-span creation logs and a tree dump of currently-active
-spans on every start/finalize. See the
-[Debug logging](#debug-logging) section above for the full flag list.
-The API key is never written to debug logs.
 
 ## License
 

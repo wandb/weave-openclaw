@@ -25,7 +25,7 @@
         "minLength": 1
       },
       "apiKey": {
-        "description": "W&B API key. String literal (discouraged), { secretRef: { source, provider, id } } shape, or omit to read WANDB_API_KEY from env.",
+        "description": "W&B API key. String literal (discouraged), { source, provider, id } SecretRef shape, or omit to read WANDB_API_KEY from env.",
         "oneOf": [
           { "type": "string" },
           {
@@ -33,7 +33,7 @@
             "additionalProperties": false,
             "required": ["source", "provider", "id"],
             "properties": {
-              "source": { "type": "string", "enum": ["env", "file", "exec"] },
+              "source": { "type": "string", "enum": ["env", "file"] },
               "provider": { "type": "string", "minLength": 1 },
               "id": { "type": "string", "minLength": 1 }
             }
@@ -43,7 +43,7 @@
       "serviceName": {
         "type": "string",
         "default": "openclaw-agent",
-        "description": "OTel Resource service.name attribute."
+        "description": "Surfaced in `/weave status` for operator visibility. Not currently stamped onto the OTel resource by the Weave Node SDK; tracked separately."
       },
       "agentName": {
         "type": "string",
@@ -58,18 +58,24 @@
         "description": "weave.agent.description attribute."
       },
       "captureContent": {
-        "type": "object",
-        "additionalProperties": false,
-        "default": { "enabled": true },
-        "properties": {
-          "enabled": { "type": "boolean", "default": true },
-          "inputMessages": { "type": "boolean", "default": true },
-          "outputMessages": { "type": "boolean", "default": true },
-          "toolArguments": { "type": "boolean", "default": true },
-          "toolResults": { "type": "boolean", "default": true },
-          "systemInstructions": { "type": "boolean", "default": true }
-        },
-        "description": "Conversation content captured into spans. Defaults to full capture so traces are useful out of the box. Set { enabled: false } for a hard off, or flip individual sub-flags (e.g. { toolResults: false }) for granular opt-out. Sub-flags default to true; only explicit false disables a field. All captured strings pass through OpenClaw's redactSensitiveText before emission."
+        "description": "Conversation content captured into spans. Defaults to ON so traces are useful out of the box. Pass `false` or `\"off\"` for a hard off (compliance/retention policy). The object form is accepted for backwards compatibility with v1 configs; in v2 only the `enabled` field is honored (the granular sub-flags are no-ops). Captured content is NOT redacted by the plugin — operators are expected to scrub upstream if needed.",
+        "default": true,
+        "oneOf": [
+          { "type": "boolean" },
+          { "type": "string", "enum": ["on", "off"] },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "enabled": { "type": "boolean", "default": true },
+              "inputMessages": { "type": "boolean" },
+              "outputMessages": { "type": "boolean" },
+              "toolArguments": { "type": "boolean" },
+              "toolResults": { "type": "boolean" },
+              "systemInstructions": { "type": "boolean" }
+            }
+          }
+        ]
       },
       "flushIntervalMs": {
         "type": "integer",
@@ -79,7 +85,7 @@
       "stripSenderWrapper": {
         "type": "boolean",
         "default": false,
-        "description": "When true, strip OpenClaw's metadata-wrapper prefix (`Conversation info` / `Sender (untrusted metadata)` / `[timestamp]`) from user-message content before emitting weave.input.messages — applies symmetrically to historyMessages and the in-flight prompt. Default false (raw): the OTel-conforming choice. `gen_ai.input.messages` is by spec the messages used in the operation, so wrappers belong in it; Phoenix, Helicone, Langfuse, and LangSmith all do the same. Set true to opt into a cleaner Weave Agents-tab chat view (the wrapper is ~500 chars and dwarfs the user's actual question), at the cost of losing visibility into prompt-injection or wrapper-format-drift bugs."
+        "description": "DEPRECATED in v2 (no-op). Setting this to true logs a one-line warning at start; the field will be removed in v3. v1 used this to strip OpenClaw's metadata-wrapper prefix from user messages; v2 emits the raw `gen_ai.input.messages` content per OTel semconv."
       }
     }
   },
@@ -91,9 +97,9 @@
       "label": "Strip Sender wrapper",
       "help": "Cleaner chat view at the cost of fidelity to what the LLM actually saw."
     },
-    "captureContent.enabled": {
+    "captureContent": {
       "label": "Capture conversation content",
-      "help": "On by default — empty traces aren't useful. Turn off (or flip individual sub-flags) when compliance/retention policy requires it."
+      "help": "On by default — empty traces aren't useful. Set to false (or \"off\") when compliance/retention policy requires it. Content is not redacted by the plugin; scrub upstream if needed."
     }
   }
 }

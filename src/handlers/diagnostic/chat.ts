@@ -6,7 +6,6 @@ import { runIsolated } from "weave";
 import { setBoundedMap } from "../../util/bounded-map.js";
 import { MAX_ENTRIES } from "../../state/registries.js";
 import type { HandlerDeps } from "../deps.js";
-import { dbg } from "../../util/dbg.js"; // DEBUG[weave-msg-trace]
 
 export function createChatDiagnosticHandlers(deps: HandlerDeps) {
   return {
@@ -17,17 +16,11 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
      * run-scoped `llm_output` content can be attached.
      */
     onChatStart(event: any): void {
-      const resolvedPresent = !!deps.getResolved();
+      if (!deps.getResolved()) return;
       const runId: string | undefined = event.runId;
       const callId: string | undefined = event.callId;
-      const turn = runId ? deps.registries.turns.get(runId) : undefined;
-      dbg(
-        `onChatStart runId=${runId} callId=${callId} model=${event.model} ` +
-          `resolved=${resolvedPresent} turnFound=${!!turn} turnsInRegistry=${deps.registries.turns.size}`,
-        deps.instanceId,
-      );
-      if (!resolvedPresent) return;
       if (!runId || !callId) return;
+      const turn = deps.registries.turns.get(runId);
       if (!turn) return;
       const llm = runIsolated(() =>
         turn.startLLM({
@@ -63,13 +56,7 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
     ): void {
       const callId: string | undefined = event.callId;
       const h = callId ? deps.registries.calls.get(callId) : undefined;
-      dbg(
-        `onChatFinalize callId=${callId} status=${status} errorType=${errorType} ` +
-          `handleFound=${!!h}`,
-        deps.instanceId,
-      );
       if (!h) return;
-      h.endTimeMs = event.ts;
       h.status = status;
       h.errorType = errorType;
     },

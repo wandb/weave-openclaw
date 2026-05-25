@@ -4,7 +4,6 @@
 
 import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
-import { dbg } from "../util/dbg.js"; // DEBUG[weave-msg-trace]
 
 /**
  * Close every chat span tracked under `runId`. Called from `onRunFinalize`
@@ -33,13 +32,6 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
   const captureContent = deps.getResolved()?.captureContent ?? false;
   const texts = output?.texts ?? [];
   const usage = toUsage(output?.usage);
-
-  dbg(
-    `closeRunChatSpans runId=${runId} chatCount=${callIds.length} ` +
-      `assistantTextCount=${texts.length} usagePresent=${usage ? "y" : "n"} ` +
-      `captureContent=${captureContent}`,
-    deps.instanceId,
-  );
 
   for (let i = 0; i < callIds.length; i++) {
     const callId = callIds[i]!;
@@ -73,7 +65,6 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
     );
     deps.registries.calls.delete(callId);
     deps.hookState.llmInputs.delete(callId);
-    deps.hookState.llmOutputs.delete(callId);
   }
 }
 

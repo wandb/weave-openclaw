@@ -20,6 +20,4 @@ export type HandlerDeps = {
   costByRun: Map<string, number>;
   /** Compaction state captured by before_compaction, consumed by after_compaction. */
   pendingCompactionByRun: Map<string, { itemsBefore: number }>;
-  /** DEBUG[weave-msg-trace]: per-plugin-instance ID for tracing dual-instance bugs. */
-  instanceId?: string;
 };

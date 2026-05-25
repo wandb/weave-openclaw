@@ -15,12 +15,11 @@ export const MAX_ENTRIES = 4096;
  * LLM handle for an in-flight chat span. We defer close until the parent
  * `run.completed` arrives so we can attach the run-level `llm_output` content
  * (OpenClaw fires `llm_output` once per attempt with all assistantTexts, not
- * per model.call). `endTimeMs` is recorded when `model.call.completed` fires
- * but `end()` is deferred to `closeRunChatSpans`.
+ * per model.call). Status/errorType are stamped when `model.call.completed` /
+ * `model.call.error` fires; `end()` is deferred to `closeRunChatSpans`.
  */
 export type LLMHandle = {
   llm: LLM;
-  endTimeMs?: number;
   status: "ok" | "error";
   errorType?: string;
 };

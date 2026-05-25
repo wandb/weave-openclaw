@@ -6,9 +6,7 @@ import { describe, expect, test } from "vitest";
 import {
   beginModelCall,
   bufferPendingLlmInputForRun,
-  captureLlmOutput,
   createWeaveHookState,
-  lookupLlm,
 } from "./hook-state.js";
 
 describe("hook-state pending llm_input buffer", () => {
@@ -31,10 +29,9 @@ describe("hook-state pending llm_input buffer", () => {
     //    must promote the buffered input under the callId-keyed bucket.
     beginModelCall(state, runId, callId);
 
-    // 3. lookupLlm using callId now returns the captured input.
-    const got = lookupLlm(state, callId, runId);
-    expect(got.input?.prompt).toBe("what's the weather?");
-    expect(got.input?.systemPrompt).toBe("you are helpful");
+    // 3. The captured input is now reachable via the callId-keyed bucket.
+    expect(state.llmInputs.get(callId)?.prompt).toBe("what's the weather?");
+    expect(state.llmInputs.get(callId)?.systemPrompt).toBe("you are helpful");
 
     // 4. Pending buffer is cleared so the next turn's llm_input doesn't
     //    accidentally promote stale data.
@@ -52,15 +49,14 @@ describe("hook-state pending llm_input buffer", () => {
     // Turn 1.
     bufferPendingLlmInputForRun(state, runId, { prompt: "first prompt" });
     beginModelCall(state, runId, callId1);
-    captureLlmOutput(state, callId1, { assistantTexts: ["thinking..."] });
 
     // Turn 2.
     bufferPendingLlmInputForRun(state, runId, { prompt: "second prompt" });
     beginModelCall(state, runId, callId2);
 
     // Each callId resolves to its own input.
-    expect(lookupLlm(state, callId1, runId).input?.prompt).toBe("first prompt");
-    expect(lookupLlm(state, callId2, runId).input?.prompt).toBe("second prompt");
+    expect(state.llmInputs.get(callId1)?.prompt).toBe("first prompt");
+    expect(state.llmInputs.get(callId2)?.prompt).toBe("second prompt");
   });
 
   test("model_call_started without a buffered llm_input is a no-op (does not crash)", () => {
@@ -68,8 +64,7 @@ describe("hook-state pending llm_input buffer", () => {
     const runId = "r-1";
     const callId = "r-1:model:1";
     beginModelCall(state, runId, callId);
-    const got = lookupLlm(state, callId, runId);
-    expect(got.input).toBeUndefined();
+    expect(state.llmInputs.get(callId)).toBeUndefined();
   });
 
   test("buffer ignores empty runId silently", () => {

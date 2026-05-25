@@ -52,6 +52,13 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
      * `run.completed`: close any chat spans tracked under this run first
      * (their content is keyed by runId/callId in shared state), then close
      * the parent Turn, stamping `weave.outcome`.
+     *
+     * Outcome -> OTel span status mapping. `aborted` / `cancelled` are user
+     * actions, not failures, so they stay OK with the outcome surfaced as
+     * an attribute; only genuine failures (`failed` / `errored` / `timeout`)
+     * mark the span ERROR. An unknown outcome string is treated as a
+     * failure too, so a new upstream value defaults to "loud" rather than
+     * silently being filed as success.
      */
     onRunFinalize(event: any): void {
       const runId: string = event.runId;
@@ -60,7 +67,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       if (!turn) return;
       const outcome = typeof event.outcome === "string" ? event.outcome : undefined;
       if (outcome) turn.setAttribute("weave.outcome", outcome);
-      if (outcome && outcome !== "completed") {
+      if (isErrorOutcome(outcome)) {
         turn.end({ error: new Error(outcome) });
       } else {
         turn.end();
@@ -84,4 +91,21 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       turn.addEvent("run_attempt", attrs);
     },
   };
+}
+
+/**
+ * Treat outcomes as failures only when they explicitly signal one. `aborted`
+ * / `cancelled` (user actions or graceful shutdown) stay OK. Unknown outcome
+ * strings are treated as failures so a new upstream value defaults to loud.
+ */
+function isErrorOutcome(outcome: string | undefined): boolean {
+  if (!outcome) return false;
+  switch (outcome) {
+    case "completed":
+    case "aborted":
+    case "cancelled":
+      return false;
+    default:
+      return true;
+  }
 }

@@ -60,7 +60,6 @@ function makeLogger() {
 function emptyHookState() {
   return {
     llmInputs: new Map(),
-    llmOutputs: new Map(),
     currentCallByRun: new Map(),
     pendingLlmInputByRun: new Map(),
     toolCallArgs: new Map(),
@@ -182,7 +181,7 @@ describe("turn lifecycle", () => {
     expect(spans.some(s => s.name === "invoke_agent")).toBe(true);
   });
 
-  it("marks the Turn as error when run outcome != 'completed'", async () => {
+  it("keeps the Turn OK when outcome is 'aborted' (user-cancel, not a failure) but stamps the outcome attr", async () => {
     const { dispatch, finish } = await bootPlugin();
     dispatch.diagnostic({
       type: "run.started",
@@ -202,6 +201,31 @@ describe("turn lifecycle", () => {
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     expect(turn?.attributes["weave.outcome"]).toBe("aborted");
+    // 0 = UNSET, 1 = OK, 2 = ERROR. User-cancel must NOT light up the
+    // Agents-tab error-rate panels.
+    expect(turn?.status.code).not.toBe(2);
+  });
+
+  it("marks the Turn as error when outcome is an actual failure ('failed')", async () => {
+    const { dispatch, finish } = await bootPlugin();
+    dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r-fail",
+      sessionKey: "s-fail",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 2000,
+      runId: "r-fail",
+      sessionKey: "s-fail",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "failed",
+    });
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn?.attributes["weave.outcome"]).toBe("failed");
     expect(turn?.status.code).toBe(2); // ERROR
   });
 

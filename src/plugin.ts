@@ -21,7 +21,6 @@ import { createChatDiagnosticHandlers } from "./handlers/diagnostic/chat.js";
 import { createToolDiagnosticHandlers } from "./handlers/diagnostic/tool.js";
 import { createUsageDiagnosticHandlers } from "./handlers/diagnostic/usage.js";
 import { createContextDiagnosticHandlers } from "./handlers/diagnostic/context.js";
-import { dbg, nextInstanceId } from "./util/dbg.js"; // DEBUG[weave-msg-trace]
 
 export type CreateWeavePluginParams = {
   pluginConfig?: unknown;
@@ -47,17 +46,12 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   const costByRun = new Map<string, number>();
   const pendingCompactionByRun = new Map<string, { itemsBefore: number }>();
 
-  // DEBUG[weave-msg-trace]: track each plugin instance separately
-  const instanceId = nextInstanceId();
-  dbg(`createWeavePlugin called (stack head: ${new Error().stack?.split("\n").slice(2, 5).join(" | ")})`, instanceId);
-
   const deps: HandlerDeps = {
     registries,
     hookState: params.hookState,
     getResolved: () => resolved,
     costByRun,
     pendingCompactionByRun,
-    instanceId,
   };
 
   const service: OpenClawPluginService = {
@@ -202,16 +196,6 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       ...compactionHooks,
     },
     diagnostic(event, meta) {
-      // DEBUG[weave-msg-trace]: temporary, remove after diagnosis.
-      // Skip log.record so we don't spam one line per write — those are the
-      // shim-captured stdout/stderr lines, not the events we care about.
-      if (event?.type !== "log.record") {
-        dbg(
-          `diagnostic type=${event?.type} trusted=${meta?.trusted} ` +
-            `runId=${event?.runId} callId=${event?.callId}`,
-          instanceId,
-        );
-      }
       if (!meta.trusted) return;
       switch (event.type) {
         case "run.started":

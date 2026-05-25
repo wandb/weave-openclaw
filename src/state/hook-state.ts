@@ -7,20 +7,23 @@ import { setBoundedMap } from "../util/bounded-map.js";
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event
  * service. Hooks fire from the OpenClaw runtime (registered in `register(api)`)
- * and capture rich payloads — prompts, assistant texts, token usage, tool
- * arguments, tool results — that the diagnostic event stream does NOT carry.
+ * and capture rich payloads — prompts, token usage, tool arguments, tool
+ * results — that the diagnostic event stream does NOT carry.
  *
  * The service later attaches this captured data to spans when the matching
  * model.call.completed / tool.execution.completed event fires.
  *
  * Keys:
- *   - llmInputs / llmOutputs: keyed by **callId** so multi-turn agents
- *     (`model→tool→model→tool→model`) attribute prompts/completions to the
- *     correct chat span. The llm_input/llm_output hook payloads do NOT carry
- *     callId — `currentCallByRun` bridges runId → currently-in-flight callId,
+ *   - llmInputs: keyed by **callId** so multi-turn agents
+ *     (`model→tool→model→tool→model`) attribute prompts to the correct chat
+ *     span. The llm_input hook payload does NOT carry callId —
+ *     `currentCallByRun` bridges runId → currently-in-flight callId,
  *     populated by the `model_call_started` hook (which does carry callId).
  *   - toolCallArgs / toolCallResults: keyed by toolCallId, which is unique
  *     per call.
+ *
+ * Assistant output is run-scoped (not call-scoped), so it lives in
+ * `registries.assistantOutputByRun` rather than here.
  */
 
 const MAX_CALLS = 4096;
@@ -31,20 +34,6 @@ export type LlmInputCapture = {
   systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];
-};
-
-export type LlmOutputCapture = {
-  assistantTexts: string[];
-  lastAssistant?: unknown;
-  usage?: {
-    input?: number;
-    output?: number;
-    cacheRead?: number;
-    cacheWrite?: number;
-    total?: number;
-    /** o1 / Claude extended-thinking reasoning tokens, when surfaced. */
-    reasoning?: number;
-  };
 };
 
 export type ToolCallArgsCapture = {
@@ -60,12 +49,10 @@ export type ToolCallResultCapture = {
 export type WeaveHookState = {
   /** callId -> input capture from llm_input hook. */
   llmInputs: Map<string, LlmInputCapture>;
-  /** callId -> output capture from llm_output hook. */
-  llmOutputs: Map<string, LlmOutputCapture>;
   /**
    * runId -> currently-in-flight callId. Set by `model_call_started` hook,
-   * read by `llm_input`/`llm_output` hooks (which don't carry callId) so the
-   * captures land under the correct callId-keyed bucket.
+   * read by `llm_input` (which doesn't carry callId) so captures land under
+   * the correct callId-keyed bucket.
    */
   currentCallByRun: Map<string, string>;
   /**
@@ -84,7 +71,6 @@ export type WeaveHookState = {
 export function createWeaveHookState(): WeaveHookState {
   return {
     llmInputs: new Map(),
-    llmOutputs: new Map(),
     currentCallByRun: new Map(),
     pendingLlmInputByRun: new Map(),
     toolCallArgs: new Map(),
@@ -108,15 +94,7 @@ const HOOK_STATE_GLOBAL_KEY = Symbol.for("weave-openclaw.hookState.v1");
 export function getSharedWeaveHookState(): WeaveHookState {
   const g = globalThis as Record<PropertyKey, unknown>;
   const existing = g[HOOK_STATE_GLOBAL_KEY] as WeaveHookState | undefined;
-  if (existing && existing.llmInputs instanceof Map) {
-    if (!(existing.currentCallByRun instanceof Map)) {
-      existing.currentCallByRun = new Map();
-    }
-    if (!(existing.pendingLlmInputByRun instanceof Map)) {
-      existing.pendingLlmInputByRun = new Map();
-    }
-    return existing;
-  }
+  if (existing && existing.llmInputs instanceof Map) return existing;
   const fresh = createWeaveHookState();
   Object.defineProperty(g, HOOK_STATE_GLOBAL_KEY, {
     value: fresh,
@@ -195,15 +173,6 @@ export function captureLlmInput(
   setBoundedMap(state.llmInputs, callId, capture, MAX_CALLS);
 }
 
-export function captureLlmOutput(
-  state: WeaveHookState,
-  callId: string,
-  capture: LlmOutputCapture,
-): void {
-  if (!callId) return;
-  setBoundedMap(state.llmOutputs, callId, capture, MAX_CALLS);
-}
-
 export function captureToolStart(
   state: WeaveHookState,
   toolCallId: string,
@@ -220,27 +189,6 @@ export function captureToolEnd(
 ): void {
   if (!toolCallId) return;
   setBoundedMap(state.toolCallResults, toolCallId, capture, MAX_TOOL_CALLS);
-}
-
-/**
- * Look up cached llm_input/llm_output for a model call. Prefers callId-keyed
- * bucket; falls back to the runId's currently-in-flight callId when the event
- * payload lacks a direct callId.
- */
-export function lookupLlm(
-  state: WeaveHookState,
-  callId: string | undefined,
-  runId: string | undefined,
-): { input?: LlmInputCapture; output?: LlmOutputCapture } {
-  let id = callId;
-  if (!id && runId) {
-    id = state.currentCallByRun.get(runId);
-  }
-  if (!id) return {};
-  return {
-    input: state.llmInputs.get(id),
-    output: state.llmOutputs.get(id),
-  };
 }
 
 export function lookupToolCall(
