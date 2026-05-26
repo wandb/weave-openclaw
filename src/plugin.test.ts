@@ -44,11 +44,16 @@ beforeEach(async () => {
   await weaveInit("test/test", {
     genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
   });
-  // Warmup span forces the SDK's lazy provider build to pin our
-  // SimpleSpanProcessor as the active span processor. Without this,
-  // the plugin's later weaveInit() call inside service.start() builds
-  // a fresh provider WITHOUT our exporter, and tests see 0 spans
-  // with no error. The warmup span itself is discarded via reset().
+  // Warmup forces the SDK's lazy provider build NOW so the cached
+  // provider gets pinned with the test's SimpleSpanProcessor. The
+  // SDK's getOrBuildProvider is first-call-wins (weave/sdks/node/src/
+  // genai/provider.ts:71-74): subsequent weave.init() updates the
+  // global client but the existing provider keeps its original
+  // settings. Without warmup, the plugin's service.start() weaveInit
+  // would land first; the plugin's first startTurn would then build
+  // the provider with the plugin's batch config and no test exporter
+  // pinned, so the test sees zero spans. The warmup span itself is
+  // discarded via reset().
   getWeaveTracer("warmup").startSpan("warmup").end();
   exporter.reset();
 });
