@@ -55,20 +55,27 @@ export default definePluginEntry({
 
     const plugin = getOrCreateSharedPlugin(api.pluginConfig);
 
+    // Inline lambdas at each api.on(...) get per-hook event/ctx typing
+    // inferred from OpenClawPluginApi.on's generic signature
+    // (<K extends PluginHookName>(name: K, handler: PluginHookHandlerMap[K])).
+    // The handler factories still accept (event: any) internally because
+    // PluginHookHandlerMap and the per-event types aren't re-exported from
+    // openclaw's public surface, but the wrong-hook-wrong-handler class of
+    // bug is caught here regardless.
     const hooks = plugin.handlers.hook;
-    if (hooks.session_start) api.on("session_start", hooks.session_start);
-    if (hooks.session_end) api.on("session_end", hooks.session_end);
-    if (hooks.model_call_started) api.on("model_call_started", hooks.model_call_started);
-    if (hooks.llm_input) api.on("llm_input", hooks.llm_input);
-    if (hooks.llm_output) api.on("llm_output", hooks.llm_output);
-    if (hooks.before_tool_call) api.on("before_tool_call", hooks.before_tool_call);
-    if (hooks.after_tool_call) api.on("after_tool_call", hooks.after_tool_call);
-    if (hooks.subagent_spawned) api.on("subagent_spawned", hooks.subagent_spawned);
-    if (hooks.subagent_ended) api.on("subagent_ended", hooks.subagent_ended);
-    if (hooks.before_compaction) api.on("before_compaction", hooks.before_compaction);
-    if (hooks.after_compaction) api.on("after_compaction", hooks.after_compaction);
-    if (hooks.agent_end) api.on("agent_end", hooks.agent_end);
-    if (hooks.message_received) api.on("message_received", hooks.message_received);
+    api.on("session_start", (event, ctx) => hooks.session_start?.(event, ctx));
+    api.on("session_end", (event, ctx) => hooks.session_end?.(event, ctx));
+    api.on("model_call_started", (event, ctx) => hooks.model_call_started?.(event, ctx));
+    api.on("llm_input", (event, ctx) => hooks.llm_input?.(event, ctx));
+    api.on("llm_output", (event, ctx) => hooks.llm_output?.(event, ctx));
+    api.on("before_tool_call", (event, ctx) => hooks.before_tool_call?.(event, ctx));
+    api.on("after_tool_call", (event, ctx) => hooks.after_tool_call?.(event, ctx));
+    api.on("subagent_spawned", (event, ctx) => hooks.subagent_spawned?.(event, ctx));
+    api.on("subagent_ended", (event, ctx) => hooks.subagent_ended?.(event, ctx));
+    api.on("before_compaction", (event, ctx) => hooks.before_compaction?.(event, ctx));
+    api.on("after_compaction", (event, ctx) => hooks.after_compaction?.(event, ctx));
+    api.on("agent_end", (event, ctx) => hooks.agent_end?.(event, ctx));
+    api.on("message_received", (event, ctx) => hooks.message_received?.(event, ctx));
 
     api.registerService(plugin.service);
 

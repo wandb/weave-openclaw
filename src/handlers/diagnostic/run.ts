@@ -3,20 +3,25 @@
 // SPDX-PackageName: weave-openclaw
 
 import { runIsolated, startSession, startTurn } from "weave";
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { stableAgentId } from "../../util/agent-id.js";
 import { setBoundedMap } from "../../util/bounded-map.js";
 import { MAX_ENTRIES } from "../../state/registries.js";
 import type { HandlerDeps } from "../deps.js";
 import { closeRunChatSpans } from "../llm-state.js";
 
+type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
+type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
+type RunAttemptEvent = Extract<DiagnosticEventPayload, { type: "run.attempt" }>;
+
 export function createRunDiagnosticHandlers(deps: HandlerDeps) {
   return {
     /** `run.started`: open the invoke_agent Turn for this runId. */
-    onRunStarted(event: any): void {
+    onRunStarted(event: RunStartedEvent): void {
       const resolved = deps.getResolved();
       if (!resolved) return;
       if (deps.registries.turns.has(event.runId)) return;
-      const sessionKey: string | undefined = event.sessionKey;
+      const sessionKey = event.sessionKey;
       const existingSession = sessionKey
         ? deps.registries.sessions.get(sessionKey)
         : undefined;
@@ -53,59 +58,45 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
      * (their content is keyed by runId/callId in shared state), then close
      * the parent Turn, stamping `weave.outcome`.
      *
-     * Outcome -> OTel span status mapping. `aborted` / `cancelled` are user
-     * actions, not failures, so they stay OK with the outcome surfaced as
-     * an attribute; only genuine failures (`failed` / `errored` / `timeout`)
-     * mark the span ERROR. An unknown outcome string is treated as a
-     * failure too, so a new upstream value defaults to "loud" rather than
-     * silently being filed as success.
+     * Outcome -> OTel span status mapping. `aborted` is a user action, not
+     * a failure, so it stays OK with the outcome surfaced as an attribute;
+     * `blocked` / `error` mark the span ERROR. Any future upstream outcome
+     * value defaults to loud (treated as error) until explicitly classified
+     * here.
      */
-    onRunFinalize(event: any): void {
-      const runId: string = event.runId;
-      closeRunChatSpans(deps, runId);
-      const turn = deps.registries.turns.get(runId);
+    onRunFinalize(event: RunCompletedEvent): void {
+      closeRunChatSpans(deps, event.runId);
+      const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      const outcome = typeof event.outcome === "string" ? event.outcome : undefined;
-      if (outcome) turn.setAttribute("weave.outcome", outcome);
-      if (isErrorOutcome(outcome)) {
-        turn.end({ error: new Error(outcome) });
+      turn.setAttribute("weave.outcome", event.outcome);
+      if (isErrorOutcome(event.outcome)) {
+        turn.end({ error: new Error(event.outcome) });
       } else {
         turn.end();
       }
-      deps.registries.turns.delete(runId);
-      deps.costByRun.delete(runId);
-      deps.pendingCompactionByRun.delete(runId);
+      deps.registries.turns.delete(event.runId);
+      deps.costByRun.delete(event.runId);
+      deps.pendingCompactionByRun.delete(event.runId);
     },
 
     /** `run.attempt`: stamp the attempt number on the Turn as a span event. */
-    onRunAttempt(event: any): void {
-      const runId: string | undefined = event.runId;
-      if (!runId) return;
-      const turn = deps.registries.turns.get(runId);
+    onRunAttempt(event: RunAttemptEvent): void {
+      const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      const attrs: Record<string, string | number | boolean> = {};
-      if (typeof event.attempt === "number" && Number.isFinite(event.attempt)) {
-        attrs["weave.run.attempt"] = Math.trunc(event.attempt);
-      }
-      if (Object.keys(attrs).length === 0) return;
-      turn.addEvent("run_attempt", attrs);
+      if (!Number.isFinite(event.attempt)) return;
+      turn.addEvent("run_attempt", {
+        "weave.run.attempt": Math.trunc(event.attempt),
+      });
     },
   };
 }
 
 /**
  * Treat outcomes as failures only when they explicitly signal one. `aborted`
- * / `cancelled` (user actions or graceful shutdown) stay OK. Unknown outcome
- * strings are treated as failures so a new upstream value defaults to loud.
+ * (user action or graceful shutdown) stays OK. The default branch keeps any
+ * unknown / future upstream value loud (treated as error) rather than
+ * silently filing it as success.
  */
-function isErrorOutcome(outcome: string | undefined): boolean {
-  if (!outcome) return false;
-  switch (outcome) {
-    case "completed":
-    case "aborted":
-    case "cancelled":
-      return false;
-    default:
-      return true;
-  }
+function isErrorOutcome(outcome: string): boolean {
+  return outcome !== "completed" && outcome !== "aborted";
 }

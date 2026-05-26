@@ -3,51 +3,62 @@
 // SPDX-PackageName: weave-openclaw
 
 import { runIsolated } from "weave";
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { lookupToolCall } from "../../state/hook-state.js";
 import { setBoundedMap } from "../../util/bounded-map.js";
 import { MAX_ENTRIES } from "../../state/registries.js";
 import type { HandlerDeps } from "../deps.js";
 import { safeJson } from "../util.js";
 
+type ToolStartEvent = Extract<DiagnosticEventPayload, { type: "tool.execution.started" }>;
+type ToolFinalizeEvent = Extract<
+  DiagnosticEventPayload,
+  { type: "tool.execution.completed" | "tool.execution.error" | "tool.execution.blocked" }
+>;
+type ToolLoopEvent = Extract<DiagnosticEventPayload, { type: "tool.loop" }>;
+
 export function createToolDiagnosticHandlers(deps: HandlerDeps) {
   return {
     /** `tool.execution.started`: open a Tool span under the current Turn. */
-    onToolStart(event: any): void {
+    onToolStart(event: ToolStartEvent): void {
       const resolved = deps.getResolved();
       if (!resolved) return;
-      const runId: string | undefined = event.runId;
-      const toolCallId: string | undefined = event.toolCallId;
-      if (!runId || !toolCallId) return;
-      const turn = deps.registries.turns.get(runId);
+      if (!event.runId || !event.toolCallId) return;
+      const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      const captured = lookupToolCall(deps.hookState, toolCallId).args;
+      const captured = lookupToolCall(deps.hookState, event.toolCallId).args;
+      // `toolInput` is an undocumented field the runtime sometimes attaches
+      // alongside `paramsSummary`. Not on the public type; falls back when
+      // present so we get richer args than the summary.
+      const runtimeToolInput = (event as unknown as { toolInput?: unknown }).toolInput;
       const args = resolved.captureContent
-        ? safeJson(captured?.params ?? event.toolInput ?? event.paramsSummary)
+        ? safeJson(captured?.params ?? runtimeToolInput ?? event.paramsSummary)
         : undefined;
       const tool = runIsolated(() =>
         turn.startTool({
           name: event.toolName ?? captured?.toolName ?? "unknown",
-          toolCallId,
+          toolCallId: event.toolCallId,
           args,
         }),
       );
-      setBoundedMap(deps.registries.tools, toolCallId, tool, MAX_ENTRIES);
+      setBoundedMap(deps.registries.tools, event.toolCallId, tool, MAX_ENTRIES);
     },
 
     /** `tool.execution.{completed,error,blocked}`: close the Tool span. */
     onToolFinalize(
-      event: any,
+      event: ToolFinalizeEvent,
       status: "ok" | "error",
       errorType: string | undefined,
     ): void {
-      const toolCallId: string | undefined = event.toolCallId;
-      if (!toolCallId) return;
-      const tool = deps.registries.tools.get(toolCallId);
+      if (!event.toolCallId) return;
+      const tool = deps.registries.tools.get(event.toolCallId);
       if (!tool) return;
       const resolved = deps.getResolved();
       if (resolved?.captureContent) {
-        const captured = lookupToolCall(deps.hookState, toolCallId).result;
-        const result = safeJson(captured?.result ?? event.toolOutput);
+        const captured = lookupToolCall(deps.hookState, event.toolCallId).result;
+        // `toolOutput` mirrors `toolInput`: undocumented runtime fallback.
+        const runtimeToolOutput = (event as unknown as { toolOutput?: unknown }).toolOutput;
+        const result = safeJson(captured?.result ?? runtimeToolOutput);
         if (result !== undefined) tool.result = result;
       }
       tool.end(
@@ -55,26 +66,27 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
           ? { error: new Error(errorType ?? "tool.execution.error") }
           : undefined,
       );
-      deps.registries.tools.delete(toolCallId);
-      deps.hookState.toolCallArgs.delete(toolCallId);
-      deps.hookState.toolCallResults.delete(toolCallId);
+      deps.registries.tools.delete(event.toolCallId);
+      deps.hookState.toolCallArgs.delete(event.toolCallId);
+      deps.hookState.toolCallResults.delete(event.toolCallId);
     },
 
     /** `tool.loop`: annotate the Turn with a tool-loop span event. */
-    onToolLoop(event: any): void {
-      const runId: string | undefined = event.runId;
+    onToolLoop(event: ToolLoopEvent): void {
+      const runId = (event as unknown as { runId?: string }).runId;
       if (!runId) return;
       const turn = deps.registries.turns.get(runId);
       if (!turn) return;
-      const attrs: Record<string, string | number | boolean> = {};
-      if (typeof event.toolName === "string") attrs["gen_ai.tool.name"] = event.toolName;
-      if (typeof event.level === "string") attrs["weave.loop.level"] = event.level;
-      if (typeof event.action === "string") attrs["weave.loop.action"] = event.action;
-      if (typeof event.count === "number" && Number.isFinite(event.count) && event.count >= 0) {
+      const attrs: Record<string, string | number | boolean> = {
+        "gen_ai.tool.name": event.toolName,
+        "weave.loop.level": event.level,
+        "weave.loop.action": event.action,
+        "weave.loop.message": event.message,
+        "weave.loop.detector": event.detector,
+      };
+      if (Number.isFinite(event.count) && event.count >= 0) {
         attrs["weave.loop.count"] = Math.trunc(event.count);
       }
-      if (typeof event.message === "string") attrs["weave.loop.message"] = event.message;
-      if (typeof event.detector === "string") attrs["weave.loop.detector"] = event.detector;
       turn.addEvent("tool.loop", attrs);
     },
   };

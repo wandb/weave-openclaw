@@ -2,16 +2,17 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
 import { setIfInt } from "../util.js";
+
+type ContextAssembledEvent = Extract<DiagnosticEventPayload, { type: "context.assembled" }>;
 
 export function createContextDiagnosticHandlers(deps: HandlerDeps) {
   return {
     /** `context.assembled`: stamp per-turn context sizing on the Turn. */
-    onContextAssembled(event: any): void {
-      const runId: string | undefined = event.runId;
-      if (!runId) return;
-      const turn = deps.registries.turns.get(runId);
+    onContextAssembled(event: ContextAssembledEvent): void {
+      const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       setIfInt(turn, "weave.context.message_count", event.messageCount);
       setIfInt(turn, "weave.context.history_text_chars", event.historyTextChars);

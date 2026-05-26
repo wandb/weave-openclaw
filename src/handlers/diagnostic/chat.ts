@@ -3,9 +3,16 @@
 // SPDX-PackageName: weave-openclaw
 
 import { runIsolated } from "weave";
+import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { setBoundedMap } from "../../util/bounded-map.js";
 import { MAX_ENTRIES } from "../../state/registries.js";
 import type { HandlerDeps } from "../deps.js";
+
+type ChatStartEvent = Extract<DiagnosticEventPayload, { type: "model.call.started" }>;
+type ChatFinalizeEvent = Extract<
+  DiagnosticEventPayload,
+  { type: "model.call.completed" | "model.call.error" }
+>;
 
 export function createChatDiagnosticHandlers(deps: HandlerDeps) {
   return {
@@ -15,47 +22,43 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
      * deferred to `closeRunChatSpans` (called from `onRunFinalize`) so the
      * run-scoped `llm_output` content can be attached.
      */
-    onChatStart(event: any): void {
+    onChatStart(event: ChatStartEvent): void {
       if (!deps.getResolved()) return;
-      const runId: string | undefined = event.runId;
-      const callId: string | undefined = event.callId;
-      if (!runId || !callId) return;
-      const turn = deps.registries.turns.get(runId);
+      const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       const llm = runIsolated(() =>
         turn.startLLM({
-          model: event.model ?? "unknown",
+          model: event.model,
           providerName: event.provider,
         }),
       );
       setBoundedMap(
         deps.registries.calls,
-        callId,
+        event.callId,
         { llm, status: "ok" },
         MAX_ENTRIES,
       );
-      const list = deps.registries.chatCallsByRun.get(runId);
+      const list = deps.registries.chatCallsByRun.get(event.runId);
       if (list) {
-        list.push(callId);
+        list.push(event.callId);
       } else {
-        deps.registries.chatCallsByRun.set(runId, [callId]);
+        deps.registries.chatCallsByRun.set(event.runId, [event.callId]);
       }
     },
 
     /**
-     * `model.call.{completed,error}`: stamp end-time, status, and errorType
-     * on the handle. The LLM span is NOT closed here — closing is deferred
-     * to `closeRunChatSpans` (run.completed) so the run-level `llm_output`
+     * `model.call.{completed,error}`: stamp status and errorType on the
+     * handle. The LLM span is NOT closed here — closing is deferred to
+     * `closeRunChatSpans` (run.completed) so the run-level `llm_output`
      * content can be attached. OpenClaw fires `llm_output` once per attempt
      * carrying ALL assistantTexts; closing earlier would emit an empty span.
      */
     onChatFinalize(
-      event: any,
+      event: ChatFinalizeEvent,
       status: "ok" | "error",
       errorType: string | undefined,
     ): void {
-      const callId: string | undefined = event.callId;
-      const h = callId ? deps.registries.calls.get(callId) : undefined;
+      const h = deps.registries.calls.get(event.callId);
       if (!h) return;
       h.status = status;
       h.errorType = errorType;

@@ -4,6 +4,10 @@
 
 import { flushOTel, init as weaveInit } from "weave";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
+import type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPayload,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { WeaveHookState } from "./state/hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
 import { createRegistries, type Registries } from "./state/registries.js";
@@ -32,8 +36,12 @@ export type WeavePlugin = {
   registries: Registries;
   getStatus: () => StatusSnapshot;
   handlers: {
+    // hook handlers stay loosely typed: PluginHookHandlerMap and the
+    // per-event types are referenced by OpenClawPluginApi.on but aren't
+    // re-exported from openclaw's public surface. Typing happens at the
+    // `api.on(...)` boundary in index.ts via inference.
     hook: Record<string, (event: any, ctx?: any) => void>;
-    diagnostic?: (event: any, meta: { trusted: boolean }) => void;
+    diagnostic?: (event: DiagnosticEventPayload, meta: DiagnosticEventMetadata) => void;
   };
 };
 
