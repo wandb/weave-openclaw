@@ -44,7 +44,7 @@ export function createLlmHookHandlers(deps: HandlerDeps) {
       const runId: string | undefined = event.runId;
       const texts = Array.isArray(event.assistantTexts) ? event.assistantTexts : [];
       if (!runId) return;
-      deps.registries.assistantOutputByRun.set(runId, {
+      deps.hookState.assistantOutputByRun.set(runId, {
         texts,
         usage: event.usage,
       });

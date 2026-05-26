@@ -5,8 +5,7 @@
 import { runIsolated } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { lookupToolCall } from "../../state/hook-state.js";
-import { setBoundedMap } from "../../util/bounded-map.js";
-import { MAX_ENTRIES } from "../../state/registries.js";
+import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
 import { safeJson } from "../util.js";
 
@@ -41,7 +40,7 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
           args,
         }),
       );
-      setBoundedMap(deps.registries.tools, event.toolCallId, tool, MAX_ENTRIES);
+      setBoundedMap(deps.registries.tools, event.toolCallId, tool, BOUNDED_MAP_CAP);
     },
 
     /** `tool.execution.{completed,error,blocked}`: close the Tool span. */

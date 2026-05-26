@@ -23,10 +23,10 @@ import type { HandlerDeps } from "./deps.js";
  * into the last span so the user-visible answer is never dropped.
  */
 export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
-  const callIds = deps.registries.chatCallsByRun.get(runId);
-  deps.registries.chatCallsByRun.delete(runId);
-  const output = deps.registries.assistantOutputByRun.get(runId);
-  deps.registries.assistantOutputByRun.delete(runId);
+  const callIds = deps.hookState.chatCallsByRun.get(runId);
+  deps.hookState.chatCallsByRun.delete(runId);
+  const output = deps.hookState.assistantOutputByRun.get(runId);
+  deps.hookState.assistantOutputByRun.delete(runId);
   if (!callIds || callIds.length === 0) return;
 
   const captureContent = deps.getResolved()?.captureContent ?? false;

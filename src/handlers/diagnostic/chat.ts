@@ -4,8 +4,7 @@
 
 import { runIsolated } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { setBoundedMap } from "../../util/bounded-map.js";
-import { MAX_ENTRIES } from "../../state/registries.js";
+import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
 
 type ChatStartEvent = Extract<DiagnosticEventPayload, { type: "model.call.started" }>;
@@ -23,7 +22,6 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
      * run-scoped `llm_output` content can be attached.
      */
     onChatStart(event: ChatStartEvent): void {
-      if (!deps.getResolved()) return;
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       const llm = runIsolated(() =>
@@ -36,13 +34,13 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
         deps.registries.calls,
         event.callId,
         { llm, status: "ok" },
-        MAX_ENTRIES,
+        BOUNDED_MAP_CAP,
       );
-      const list = deps.registries.chatCallsByRun.get(event.runId);
+      const list = deps.hookState.chatCallsByRun.get(event.runId);
       if (list) {
         list.push(event.callId);
       } else {
-        deps.registries.chatCallsByRun.set(event.runId, [event.callId]);
+        deps.hookState.chatCallsByRun.set(event.runId, [event.callId]);
       }
     },
 

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { setBoundedMap } from "../util/bounded-map.js";
+import { BOUNDED_MAP_CAP, setBoundedMap } from "../util/bounded-map.js";
 
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event
@@ -21,14 +21,12 @@ import { setBoundedMap } from "../util/bounded-map.js";
  *     populated by the `model_call_started` hook (which does carry callId).
  *   - toolCallArgs / toolCallResults: keyed by toolCallId, which is unique
  *     per call.
- *
- * Assistant output is run-scoped (not call-scoped), so it lives in
- * `registries.assistantOutputByRun` rather than here.
+ *   - chatCallsByRun: ordered list of callIds per runId. Used at
+ *     `run.completed` to attribute the per-attempt assistantTexts to chat
+ *     spans positionally.
+ *   - assistantOutputByRun: per-attempt texts+usage captured by `llm_output`,
+ *     keyed by runId. Consumed by `closeRunChatSpans` at finalize.
  */
-
-const MAX_CALLS = 4096;
-const MAX_TOOL_CALLS = 4096;
-const MAX_RUNS_TO_TRACK = 4096;
 
 export type LlmInputCapture = {
   systemPrompt?: string;
@@ -44,6 +42,11 @@ export type ToolCallArgsCapture = {
 
 export type ToolCallResultCapture = {
   result?: unknown;
+};
+
+export type AssistantOutputBuffer = {
+  texts: string[];
+  usage?: unknown;
 };
 
 export type WeaveHookState = {
@@ -66,6 +69,10 @@ export type WeaveHookState = {
   pendingLlmInputByRun: Map<string, LlmInputCapture>;
   toolCallArgs: Map<string, ToolCallArgsCapture>;
   toolCallResults: Map<string, ToolCallResultCapture>;
+  /** Ordered callIds per runId. Used at run.completed to attach output texts. */
+  chatCallsByRun: Map<string, string[]>;
+  /** Assistant texts + usage captured at run scope by the llm_output hook. */
+  assistantOutputByRun: Map<string, AssistantOutputBuffer>;
 };
 
 export function createWeaveHookState(): WeaveHookState {
@@ -75,6 +82,8 @@ export function createWeaveHookState(): WeaveHookState {
     pendingLlmInputByRun: new Map(),
     toolCallArgs: new Map(),
     toolCallResults: new Map(),
+    chatCallsByRun: new Map(),
+    assistantOutputByRun: new Map(),
   };
 }
 
@@ -94,10 +103,10 @@ export function beginModelCall(
   callId: string,
 ): void {
   if (!runId || !callId) return;
-  setBoundedMap(state.currentCallByRun, runId, callId, MAX_RUNS_TO_TRACK);
+  setBoundedMap(state.currentCallByRun, runId, callId, BOUNDED_MAP_CAP);
   const pending = state.pendingLlmInputByRun.get(runId);
   if (pending) {
-    setBoundedMap(state.llmInputs, callId, pending, MAX_CALLS);
+    setBoundedMap(state.llmInputs, callId, pending, BOUNDED_MAP_CAP);
     state.pendingLlmInputByRun.delete(runId);
   }
 }
@@ -119,7 +128,7 @@ export function bufferPendingLlmInputForRun(
   capture: LlmInputCapture,
 ): void {
   if (!runId) return;
-  setBoundedMap(state.pendingLlmInputByRun, runId, capture, MAX_RUNS_TO_TRACK);
+  setBoundedMap(state.pendingLlmInputByRun, runId, capture, BOUNDED_MAP_CAP);
 }
 
 /**
@@ -143,7 +152,7 @@ export function captureLlmInput(
   capture: LlmInputCapture,
 ): void {
   if (!callId) return;
-  setBoundedMap(state.llmInputs, callId, capture, MAX_CALLS);
+  setBoundedMap(state.llmInputs, callId, capture, BOUNDED_MAP_CAP);
 }
 
 export function captureToolStart(
@@ -152,7 +161,7 @@ export function captureToolStart(
   capture: ToolCallArgsCapture,
 ): void {
   if (!toolCallId) return;
-  setBoundedMap(state.toolCallArgs, toolCallId, capture, MAX_TOOL_CALLS);
+  setBoundedMap(state.toolCallArgs, toolCallId, capture, BOUNDED_MAP_CAP);
 }
 
 export function captureToolEnd(
@@ -161,7 +170,7 @@ export function captureToolEnd(
   capture: ToolCallResultCapture,
 ): void {
   if (!toolCallId) return;
-  setBoundedMap(state.toolCallResults, toolCallId, capture, MAX_TOOL_CALLS);
+  setBoundedMap(state.toolCallResults, toolCallId, capture, BOUNDED_MAP_CAP);
 }
 
 export function lookupToolCall(

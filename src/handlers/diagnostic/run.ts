@@ -4,15 +4,15 @@
 
 import { runIsolated, startSession, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { stableAgentId } from "../../util/agent-id.js";
-import { setBoundedMap } from "../../util/bounded-map.js";
-import { MAX_ENTRIES } from "../../state/registries.js";
+import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
 import { closeRunChatSpans } from "../llm-state.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
 type RunAttemptEvent = Extract<DiagnosticEventPayload, { type: "run.attempt" }>;
+
+const DEFAULT_AGENT_NAME = "openclaw-agent";
 
 export function createRunDiagnosticHandlers(deps: HandlerDeps) {
   return {
@@ -25,8 +25,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       const existingSession = sessionKey
         ? deps.registries.sessions.get(sessionKey)
         : undefined;
-      const agentName =
-        resolved.agentName ?? stableAgentId(resolved.entity, resolved.project, undefined);
+      const agentName = resolved.agentName ?? DEFAULT_AGENT_NAME;
       const session =
         existingSession ??
         (sessionKey
@@ -37,7 +36,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
                   agentName,
                 }),
               );
-              setBoundedMap(deps.registries.sessions, sessionKey, s, MAX_ENTRIES);
+              setBoundedMap(deps.registries.sessions, sessionKey, s, BOUNDED_MAP_CAP);
               return s;
             })()
           : undefined);
@@ -50,7 +49,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
         turn.setAttribute("weave.agent.version", resolved.agentVersion);
       if (resolved.agentDescription)
         turn.setAttribute("weave.agent.description", resolved.agentDescription);
-      setBoundedMap(deps.registries.turns, event.runId, turn, MAX_ENTRIES);
+      setBoundedMap(deps.registries.turns, event.runId, turn, BOUNDED_MAP_CAP);
     },
 
     /**

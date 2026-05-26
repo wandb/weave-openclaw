@@ -64,22 +64,24 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     pendingCompactionByRun,
   };
 
+  function resetTransientState(): void {
+    registries.sessions.clear();
+    registries.turns.clear();
+    registries.calls.clear();
+    registries.tools.clear();
+    registries.subagents.clear();
+    params.hookState.chatCallsByRun.clear();
+    params.hookState.assistantOutputByRun.clear();
+    costByRun.clear();
+    pendingCompactionByRun.clear();
+  }
+
   const service: OpenClawPluginService = {
     id: "weave",
     async start(ctx) {
       logger = ctx.logger;
       // If start() is called without a prior stop(), drop accumulated state.
-      if (lifecycle === "running") {
-        registries.sessions.clear();
-        registries.turns.clear();
-        registries.calls.clear();
-        registries.tools.clear();
-        registries.subagents.clear();
-        registries.chatCallsByRun.clear();
-        registries.assistantOutputByRun.clear();
-        costByRun.clear();
-        pendingCompactionByRun.clear();
-      }
+      if (lifecycle === "running") resetTransientState();
       resolved = undefined;
       startedAt = undefined;
       lifecycle = "not-started";
@@ -145,15 +147,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
           `weave: flushOTel failed during stop: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
-      registries.sessions.clear();
-      registries.turns.clear();
-      registries.calls.clear();
-      registries.tools.clear();
-      registries.subagents.clear();
-      registries.chatCallsByRun.clear();
-      registries.assistantOutputByRun.clear();
-      costByRun.clear();
-      pendingCompactionByRun.clear();
+      resetTransientState();
     },
   };
 
@@ -212,6 +206,11 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     },
     diagnostic(event, meta) {
       if (!meta.trusted) return;
+      // Single boundary check: events arriving between register() (when this
+      // listener subscribes) and start() (when config resolves) drop here
+      // instead of each handler re-checking. After resolved is set every
+      // case below can safely look up state without re-guarding.
+      if (!resolved) return;
       switch (event.type) {
         case "run.started":
           return runDiag.onRunStarted(event);

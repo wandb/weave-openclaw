@@ -3,6 +3,13 @@
 // SPDX-PackageName: weave-openclaw
 
 /**
+ * Shared FIFO cap for every plugin-owned Map. One number, one knob: turn
+ * it up if a real workload hits the bound, but every map shares the same
+ * bound so memory growth is bounded uniformly.
+ */
+export const BOUNDED_MAP_CAP = 4096;
+
+/**
  * Set a key on a Map with FIFO size bound. If the Map is at capacity AND the
  * key is new, the oldest entry (first-inserted) is evicted before insert.
  * Maps in JS preserve insertion order, so this is O(1).

@@ -69,6 +69,8 @@ function emptyHookState() {
     pendingLlmInputByRun: new Map(),
     toolCallArgs: new Map(),
     toolCallResults: new Map(),
+    chatCallsByRun: new Map(),
+    assistantOutputByRun: new Map(),
   } as any;
 }
 
@@ -234,7 +236,7 @@ describe("turn lifecycle", () => {
     expect(turn?.status.code).toBe(2); // ERROR
   });
 
-  it("falls back to stableAgentId for agentName when config omits it", async () => {
+  it("falls back to the default agent name when config omits agentName", async () => {
     const ctx = await bootPlugin();  // no explicit agentName
     ctx.dispatch.diagnostic({
       type: "run.started",
@@ -919,7 +921,7 @@ describe("concurrent runs", () => {
 
 describe("hot-reload / lifecycle", () => {
   it("start() called twice without an intervening stop() drops accumulated per-run state from the previous start", async () => {
-    const { plugin, dispatch } = await bootPlugin();
+    const { plugin, hookState, dispatch } = await bootPlugin();
     // Open some state under the first start().
     dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-1", sessionKey: "s",
       trace: { traceId: "t", spanId: "sp" } });
@@ -938,8 +940,8 @@ describe("hot-reload / lifecycle", () => {
     expect(plugin.registries.calls.size).toBe(0);
     expect(plugin.registries.tools.size).toBe(0);
     expect(plugin.registries.subagents.size).toBe(0);
-    expect(plugin.registries.chatCallsByRun.size).toBe(0);
-    expect(plugin.registries.assistantOutputByRun.size).toBe(0);
+    expect(hookState.chatCallsByRun.size).toBe(0);
+    expect(hookState.assistantOutputByRun.size).toBe(0);
 
     await plugin.service.stop({ logger: makeLogger() } as any);
   });

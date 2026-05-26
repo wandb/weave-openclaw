@@ -3,10 +3,10 @@
 // SPDX-PackageName: weave-openclaw
 
 import { runIsolated, startSession } from "weave";
-import { stableAgentId } from "../../util/agent-id.js";
-import { setBoundedMap } from "../../util/bounded-map.js";
-import { MAX_ENTRIES } from "../../state/registries.js";
+import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
+
+const DEFAULT_AGENT_NAME = "openclaw-agent";
 
 export function createSessionHookHandlers(deps: HandlerDeps) {
   return {
@@ -17,11 +17,10 @@ export function createSessionHookHandlers(deps: HandlerDeps) {
       const session = runIsolated(() =>
         startSession({
           sessionId: key,
-          agentName:
-            resolved.agentName ?? stableAgentId(resolved.entity, resolved.project, undefined),
+          agentName: resolved.agentName ?? DEFAULT_AGENT_NAME,
         }),
       );
-      setBoundedMap(deps.registries.sessions, key, session, MAX_ENTRIES);
+      setBoundedMap(deps.registries.sessions, key, session, BOUNDED_MAP_CAP);
     },
 
     session_end(event: any): void {

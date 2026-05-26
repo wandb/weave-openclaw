@@ -22,8 +22,8 @@ export function createUsageDiagnosticHandlers(deps: HandlerDeps) {
       if (!runId) return;
       const turn = deps.registries.turns.get(runId);
       if (!turn) return;
-      if (typeof event.costUsd === "number" && Number.isFinite(event.costUsd)) {
-        const total = (deps.costByRun.get(runId) ?? 0) + event.costUsd;
+      if (Number.isFinite(event.costUsd)) {
+        const total = (deps.costByRun.get(runId) ?? 0) + event.costUsd!;
         deps.costByRun.set(runId, total);
         turn.setAttribute("weave.cost.usd", total);
       }
