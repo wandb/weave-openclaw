@@ -1,6 +1,6 @@
 {
   "name": "weave-openclaw",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "OpenClaw third-party plugin: emit agent diagnostic events to W&B Weave's Agents OTel endpoint (weave.* attribute namespace).",
   "license": "MIT",
   "type": "module",
