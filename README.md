@@ -69,9 +69,9 @@ emit the diagnostic events this plugin consumes.
           agentName: "my-agent",
           agentVersion: "v1.0",
           agentDescription: "What my agent does.",
-          // ON by default. Pass `false` or `"off"` for a hard off
-          // (compliance / retention policy). Plugin does NOT redact
-          // captured strings; scrub upstream if needed.
+          // ON by default. Set to false for a hard off (compliance
+          // or retention policy). Plugin does NOT redact captured
+          // strings; scrub upstream if needed.
           captureContent: true,
           flushIntervalMs: 5000,
         },
