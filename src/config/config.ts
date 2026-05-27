@@ -40,16 +40,13 @@ export type ResolvedConfig = {
 };
 
 export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
-  const entity =
-    nonEmpty(raw.entity) ??
-    nonEmpty(readPosixUser()) ??
-    nonEmpty(readWindowsUser());
+  const entity = raw.entity || readPosixUser() || readWindowsUser();
   if (!entity) {
     throw new Error(
       "weave: config.entity is required and could not be defaulted ($USER/$USERNAME unset)",
     );
   }
-  const project = nonEmpty(raw.project) ?? "openclaw-default";
+  const project = raw.project || "openclaw-default";
 
   const apiKey = raw.apiKey ? await resolveApiKey(raw.apiKey) : undefined;
 
@@ -63,7 +60,7 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
     entity,
     project,
     projectId: `${entity}/${project}`,
-    serviceName: nonEmpty(raw.serviceName) ?? DEFAULT_SERVICE_NAME,
+    serviceName: raw.serviceName || DEFAULT_SERVICE_NAME,
     agentName: raw.agentName,
     agentVersion: resolveAgentVersion(raw.agentVersion),
     agentDescription: raw.agentDescription,
@@ -109,6 +106,3 @@ async function resolveApiKey(
   );
 }
 
-function nonEmpty(v: unknown): string | undefined {
-  return typeof v === "string" && v.length > 0 ? v : undefined;
-}

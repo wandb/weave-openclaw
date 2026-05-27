@@ -48,19 +48,19 @@ describe("end-to-end smoke", () => {
     });
     await plugin.service.start({ logger: makeLogger() } as any);
 
-    const h = plugin.handlers.hook;
-    const d = plugin.handlers.diagnostic!;
+    const hooks = plugin.handlers.hook;
+    const emit = plugin.handlers.diagnostic!;
 
-    h.session_start!({ sessionKey: "s-1" });
-    d({
+    hooks.session_start!({ sessionKey: "s-1" });
+    emit({
       type: "run.started",
       ts: 1000,
       runId: "r-1",
       sessionKey: "s-1",
       trace: { traceId: "t", spanId: "sp" },
     }, { trusted: true });
-    h.model_call_started!({ runId: "r-1", callId: "c-1" });
-    d({
+    hooks.model_call_started!({ runId: "r-1", callId: "c-1" });
+    emit({
       type: "model.call.started",
       ts: 1100,
       runId: "r-1",
@@ -68,14 +68,14 @@ describe("end-to-end smoke", () => {
       model: "gpt-4o",
       trace: { traceId: "t", spanId: "csp", parentSpanId: "sp" },
     }, { trusted: true });
-    h.llm_input!({ runId: "r-1", prompt: "hi", systemPrompt: "be helpful" });
-    h.before_tool_call!({
+    hooks.llm_input!({ runId: "r-1", prompt: "hi", systemPrompt: "be helpful" });
+    hooks.before_tool_call!({
       runId: "r-1",
       toolCallId: "tc-1",
       toolName: "search",
       params: { q: "weave" },
     });
-    d({
+    emit({
       type: "tool.execution.started",
       ts: 1200,
       runId: "r-1",
@@ -83,34 +83,34 @@ describe("end-to-end smoke", () => {
       toolName: "search",
       trace: { traceId: "t", spanId: "tcsp", parentSpanId: "csp" },
     }, { trusted: true });
-    h.after_tool_call!({ runId: "r-1", toolCallId: "tc-1", result: { hits: 7 } });
-    d({
+    hooks.after_tool_call!({ runId: "r-1", toolCallId: "tc-1", result: { hits: 7 } });
+    emit({
       type: "tool.execution.completed",
       ts: 1300,
       runId: "r-1",
       toolCallId: "tc-1",
       trace: { traceId: "t", spanId: "tcsp" },
     }, { trusted: true });
-    h.llm_output!({
+    hooks.llm_output!({
       runId: "r-1",
       assistantTexts: ["found 7"],
       usage: { input: 5, output: 3 },
     });
-    d({
+    emit({
       type: "model.call.completed",
       ts: 1400,
       runId: "r-1",
       callId: "c-1",
       trace: { traceId: "t", spanId: "csp" },
     }, { trusted: true });
-    d({
+    emit({
       type: "model.usage",
       ts: 1450,
       runId: "r-1",
       costUsd: 0.0001,
       trace: { traceId: "t", spanId: "sp" },
     }, { trusted: true });
-    d({
+    emit({
       type: "run.completed",
       ts: 1500,
       runId: "r-1",
@@ -118,7 +118,7 @@ describe("end-to-end smoke", () => {
       trace: { traceId: "t", spanId: "sp" },
       outcome: "completed",
     }, { trusted: true });
-    h.session_end!({ sessionKey: "s-1" });
+    hooks.session_end!({ sessionKey: "s-1" });
 
     await plugin.service.stop({ logger: makeLogger() } as any);
 
@@ -167,42 +167,42 @@ describe("end-to-end smoke", () => {
       hookState,
     });
     await plugin.service.start({ logger: makeLogger() } as any);
-    const h = plugin.handlers.hook;
-    const d = plugin.handlers.diagnostic!;
+    const hooks = plugin.handlers.hook;
+    const emit = plugin.handlers.diagnostic!;
 
-    h.session_start!({ sessionKey: "s-2" });
-    d({ type: "run.started", ts: 1000, runId: "r-2", sessionKey: "s-2",
+    hooks.session_start!({ sessionKey: "s-2" });
+    emit({ type: "run.started", ts: 1000, runId: "r-2", sessionKey: "s-2",
         trace: { traceId: "tt", spanId: "sp2" } }, { trusted: true });
     // llm_input fires ONCE, before model_call_started (real OpenClaw order).
-    h.llm_input!({ runId: "r-2", prompt: "find tennis stats", systemPrompt: "be brief" });
+    hooks.llm_input!({ runId: "r-2", prompt: "find tennis stats", systemPrompt: "be brief" });
     // First model call: model:1 -> emits "I'll search" + a tool call.
-    h.model_call_started!({ runId: "r-2", callId: "c-A" });
-    d({ type: "model.call.started", ts: 1100, runId: "r-2", callId: "c-A", model: "gpt-4o",
+    hooks.model_call_started!({ runId: "r-2", callId: "c-A" });
+    emit({ type: "model.call.started", ts: 1100, runId: "r-2", callId: "c-A", model: "gpt-4o",
         trace: { traceId: "tt", spanId: "csp-A", parentSpanId: "sp2" } }, { trusted: true });
-    d({ type: "model.call.completed", ts: 1200, runId: "r-2", callId: "c-A",
+    emit({ type: "model.call.completed", ts: 1200, runId: "r-2", callId: "c-A",
         trace: { traceId: "tt", spanId: "csp-A" } }, { trusted: true });
     // Tool runs between the two model calls.
-    h.before_tool_call!({ runId: "r-2", toolCallId: "tc-A", toolName: "search", params: { q: "tennis" } });
-    d({ type: "tool.execution.started", ts: 1250, runId: "r-2", toolCallId: "tc-A", toolName: "search",
+    hooks.before_tool_call!({ runId: "r-2", toolCallId: "tc-A", toolName: "search", params: { q: "tennis" } });
+    emit({ type: "tool.execution.started", ts: 1250, runId: "r-2", toolCallId: "tc-A", toolName: "search",
         trace: { traceId: "tt", spanId: "tsp-A", parentSpanId: "sp2" } }, { trusted: true });
-    h.after_tool_call!({ runId: "r-2", toolCallId: "tc-A", result: { hits: 3 } });
-    d({ type: "tool.execution.completed", ts: 1300, runId: "r-2", toolCallId: "tc-A",
+    hooks.after_tool_call!({ runId: "r-2", toolCallId: "tc-A", result: { hits: 3 } });
+    emit({ type: "tool.execution.completed", ts: 1300, runId: "r-2", toolCallId: "tc-A",
         trace: { traceId: "tt", spanId: "tsp-A" } }, { trusted: true });
     // Second model call: model:2 -> final answer.
-    h.model_call_started!({ runId: "r-2", callId: "c-B" });
-    d({ type: "model.call.started", ts: 1400, runId: "r-2", callId: "c-B", model: "gpt-4o",
+    hooks.model_call_started!({ runId: "r-2", callId: "c-B" });
+    emit({ type: "model.call.started", ts: 1400, runId: "r-2", callId: "c-B", model: "gpt-4o",
         trace: { traceId: "tt", spanId: "csp-B", parentSpanId: "sp2" } }, { trusted: true });
-    d({ type: "model.call.completed", ts: 1500, runId: "r-2", callId: "c-B",
+    emit({ type: "model.call.completed", ts: 1500, runId: "r-2", callId: "c-B",
         trace: { traceId: "tt", spanId: "csp-B" } }, { trusted: true });
     // llm_output fires ONCE at end of attempt with BOTH texts.
-    h.llm_output!({
+    hooks.llm_output!({
       runId: "r-2",
       assistantTexts: ["I'll search", "Found 3 results"],
       usage: { input: 12, output: 8 },
     });
-    d({ type: "run.completed", ts: 1600, runId: "r-2", sessionKey: "s-2",
+    emit({ type: "run.completed", ts: 1600, runId: "r-2", sessionKey: "s-2",
         trace: { traceId: "tt", spanId: "sp2" }, outcome: "completed" }, { trusted: true });
-    h.session_end!({ sessionKey: "s-2" });
+    hooks.session_end!({ sessionKey: "s-2" });
 
     await plugin.service.stop({ logger: makeLogger() } as any);
 
