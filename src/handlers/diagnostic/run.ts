@@ -4,7 +4,6 @@
 
 import { runIsolated, startSession, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
-import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
 import { closeRunChatSpans } from "../llm-state.js";
 
@@ -36,7 +35,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
                   agentName,
                 }),
               );
-              setBoundedMap(deps.registries.sessions, sessionKey, s, BOUNDED_MAP_CAP);
+              deps.registries.sessions.set(sessionKey, s);
               return s;
             })()
           : undefined);
@@ -49,7 +48,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
         turn.setAttribute("weave.agent.version", resolved.agentVersion);
       if (resolved.agentDescription)
         turn.setAttribute("weave.agent.description", resolved.agentDescription);
-      setBoundedMap(deps.registries.turns, event.runId, turn, BOUNDED_MAP_CAP);
+      deps.registries.turns.set(event.runId, turn);
     },
 
     /**

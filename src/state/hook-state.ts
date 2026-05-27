@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { BOUNDED_MAP_CAP, setBoundedMap } from "../util/bounded-map.js";
+import { BoundedMap } from "../util/bounded-map.js";
 
 /**
  * Shared state across the plugin's hook subscriptions and the diagnostic-event
@@ -51,13 +51,13 @@ export type AssistantOutputBuffer = {
 
 export type WeaveHookState = {
   /** callId -> input capture from llm_input hook. */
-  llmInputs: Map<string, LlmInputCapture>;
+  llmInputs: BoundedMap<string, LlmInputCapture>;
   /**
    * runId -> currently-in-flight callId. Set by `model_call_started` hook,
    * read by `llm_input` (which doesn't carry callId) so captures land under
    * the correct callId-keyed bucket.
    */
-  currentCallByRun: Map<string, string>;
+  currentCallByRun: BoundedMap<string, string>;
   /**
    * runId -> llm_input capture that arrived BEFORE `model_call_started`.
    * The OpenClaw runtime fires `llm_input` first (so the prompt is captured
@@ -66,24 +66,24 @@ export type WeaveHookState = {
    * callId-keyed bucket. One entry per runId because a single run can only
    * have one in-flight model call at a time.
    */
-  pendingLlmInputByRun: Map<string, LlmInputCapture>;
-  toolCallArgs: Map<string, ToolCallArgsCapture>;
-  toolCallResults: Map<string, ToolCallResultCapture>;
+  pendingLlmInputByRun: BoundedMap<string, LlmInputCapture>;
+  toolCallArgs: BoundedMap<string, ToolCallArgsCapture>;
+  toolCallResults: BoundedMap<string, ToolCallResultCapture>;
   /** Ordered callIds per runId. Used at run.completed to attach output texts. */
-  chatCallsByRun: Map<string, string[]>;
+  chatCallsByRun: BoundedMap<string, string[]>;
   /** Assistant texts + usage captured at run scope by the llm_output hook. */
-  assistantOutputByRun: Map<string, AssistantOutputBuffer>;
+  assistantOutputByRun: BoundedMap<string, AssistantOutputBuffer>;
 };
 
 export function createWeaveHookState(): WeaveHookState {
   return {
-    llmInputs: new Map(),
-    currentCallByRun: new Map(),
-    pendingLlmInputByRun: new Map(),
-    toolCallArgs: new Map(),
-    toolCallResults: new Map(),
-    chatCallsByRun: new Map(),
-    assistantOutputByRun: new Map(),
+    llmInputs: new BoundedMap(),
+    currentCallByRun: new BoundedMap(),
+    pendingLlmInputByRun: new BoundedMap(),
+    toolCallArgs: new BoundedMap(),
+    toolCallResults: new BoundedMap(),
+    chatCallsByRun: new BoundedMap(),
+    assistantOutputByRun: new BoundedMap(),
   };
 }
 
@@ -103,10 +103,10 @@ export function beginModelCall(
   callId: string,
 ): void {
   if (!runId || !callId) return;
-  setBoundedMap(state.currentCallByRun, runId, callId, BOUNDED_MAP_CAP);
+  state.currentCallByRun.set(runId, callId);
   const pending = state.pendingLlmInputByRun.get(runId);
   if (pending) {
-    setBoundedMap(state.llmInputs, callId, pending, BOUNDED_MAP_CAP);
+    state.llmInputs.set(callId, pending);
     state.pendingLlmInputByRun.delete(runId);
   }
 }
@@ -128,7 +128,7 @@ export function bufferPendingLlmInputForRun(
   capture: LlmInputCapture,
 ): void {
   if (!runId) return;
-  setBoundedMap(state.pendingLlmInputByRun, runId, capture, BOUNDED_MAP_CAP);
+  state.pendingLlmInputByRun.set(runId, capture);
 }
 
 /**
@@ -152,7 +152,7 @@ export function captureLlmInput(
   capture: LlmInputCapture,
 ): void {
   if (!callId) return;
-  setBoundedMap(state.llmInputs, callId, capture, BOUNDED_MAP_CAP);
+  state.llmInputs.set(callId, capture);
 }
 
 export function captureToolStart(
@@ -161,7 +161,7 @@ export function captureToolStart(
   capture: ToolCallArgsCapture,
 ): void {
   if (!toolCallId) return;
-  setBoundedMap(state.toolCallArgs, toolCallId, capture, BOUNDED_MAP_CAP);
+  state.toolCallArgs.set(toolCallId, capture);
 }
 
 export function captureToolEnd(
@@ -170,7 +170,7 @@ export function captureToolEnd(
   capture: ToolCallResultCapture,
 ): void {
   if (!toolCallId) return;
-  setBoundedMap(state.toolCallResults, toolCallId, capture, BOUNDED_MAP_CAP);
+  state.toolCallResults.set(toolCallId, capture);
 }
 
 export function lookupToolCall(

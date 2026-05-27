@@ -16,6 +16,7 @@ import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
 import type { HandlerDeps, HandlerLogger } from "./handlers/deps.js";
 import type { HookHandlers } from "./handlers/hook-types.js";
+import { BoundedMap } from "./util/bounded-map.js";
 import { createSessionHookHandlers } from "./handlers/hooks/session.js";
 import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
 import { createToolHookHandlers } from "./handlers/hooks/tool.js";
@@ -59,8 +60,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let lifecycle: StatusSnapshot["lifecycle"] = "not-started";
   let lifecycleDetail: string | undefined;
   let startedAt: number | undefined;
-  const costByRun = new Map<string, number>();
-  const pendingCompactionByRun = new Map<string, { itemsBefore: number }>();
+  const costByRun = new BoundedMap<string, number>();
+  const pendingCompactionByRun = new BoundedMap<string, { itemsBefore: number }>();
   let logger: HandlerLogger | undefined;
 
   const deps: HandlerDeps = {

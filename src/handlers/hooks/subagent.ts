@@ -3,7 +3,6 @@
 // SPDX-PackageName: weave-openclaw
 
 import { runIsolated } from "weave";
-import { BOUNDED_MAP_CAP, setBoundedMap } from "../../util/bounded-map.js";
 import type { HandlerDeps } from "../deps.js";
 import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
 
@@ -29,7 +28,7 @@ export function createSubagentHookHandlers(deps: HandlerDeps): {
       if (event.label) evAttrs["weave.agent.description"] = event.label;
       if (event.childSessionKey) evAttrs["gen_ai.conversation.id"] = event.childSessionKey;
       turn.addEvent("subagent_spawned", evAttrs);
-      setBoundedMap(deps.registries.subagents, event.runId, sub, BOUNDED_MAP_CAP);
+      deps.registries.subagents.set(event.runId, sub);
     },
 
     subagent_ended(event: HookEvent<"subagent_ended">): void {

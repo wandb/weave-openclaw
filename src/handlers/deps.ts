@@ -5,6 +5,7 @@
 import type { ResolvedConfig } from "../config/config.js";
 import type { WeaveHookState } from "../state/hook-state.js";
 import type { Registries } from "../state/registries.js";
+import type { BoundedMap } from "../util/bounded-map.js";
 
 export type HandlerLogger = {
   warn(msg: string): void;
@@ -22,7 +23,7 @@ export type HandlerDeps = {
   getResolved: () => ResolvedConfig | undefined;
   getLogger: () => HandlerLogger | undefined;
   /** Cumulative cost per runId. Owned here so onModelUsage and onRunFinalize share it. */
-  costByRun: Map<string, number>;
+  costByRun: BoundedMap<string, number>;
   /** Compaction state captured by before_compaction, consumed by after_compaction. */
-  pendingCompactionByRun: Map<string, { itemsBefore: number }>;
+  pendingCompactionByRun: BoundedMap<string, { itemsBefore: number }>;
 };

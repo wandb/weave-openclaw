@@ -3,6 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import type { LLM, Session, SubAgent, Tool, Turn } from "weave";
+import { BoundedMap } from "../util/bounded-map.js";
 
 /**
  * Per-plugin-instance Maps from upstream OpenClaw ids to live Weave SDK
@@ -25,19 +26,19 @@ export type LLMHandle = {
 };
 
 export type Registries = {
-  sessions: Map<string, Session>;
-  turns: Map<string, Turn>;
-  calls: Map<string, LLMHandle>;
-  tools: Map<string, Tool>;
-  subagents: Map<string, SubAgent>;
+  sessions: BoundedMap<string, Session>;
+  turns: BoundedMap<string, Turn>;
+  calls: BoundedMap<string, LLMHandle>;
+  tools: BoundedMap<string, Tool>;
+  subagents: BoundedMap<string, SubAgent>;
 };
 
 export function createRegistries(): Registries {
   return {
-    sessions: new Map(),
-    turns: new Map(),
-    calls: new Map(),
-    tools: new Map(),
-    subagents: new Map(),
+    sessions: new BoundedMap(),
+    turns: new BoundedMap(),
+    calls: new BoundedMap(),
+    tools: new BoundedMap(),
+    subagents: new BoundedMap(),
   };
 }
