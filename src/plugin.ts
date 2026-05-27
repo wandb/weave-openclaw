@@ -10,6 +10,7 @@ import type {
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { WeaveHookState } from "./state/hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
+import { readWandbApiKey, readWandbBaseUrl, setWandbApiKey } from "./config/env.js";
 import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
@@ -114,8 +115,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         return;
       }
       if (cfg.apiKey) {
-        process.env.WANDB_API_KEY = cfg.apiKey;
-      } else if (!process.env.WANDB_API_KEY) {
+        setWandbApiKey(cfg.apiKey);
+      } else if (!readWandbApiKey()) {
         lifecycle = "config-error";
         lifecycleDetail = "no W&B API key found";
         ctx.logger.error(
@@ -162,7 +163,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       startedAt,
     };
     if (resolved) {
-      const wandbBase = process.env.WANDB_BASE_URL?.trim();
+      const wandbBase = readWandbBaseUrl();
       const uiUrl =
         !wandbBase || wandbBase === WANDB_CLOUD_API_BASE_URL
           ? `${WANDB_CLOUD_UI_BASE_URL}/${resolved.projectId}/weave`

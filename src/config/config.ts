@@ -4,6 +4,7 @@
 
 import { readFile } from "node:fs/promises";
 import type { SecretRef } from "openclaw/plugin-sdk/secret-ref-runtime";
+import { readPosixUser, readSecretEnv, readWindowsUser } from "./env.js";
 import { PACKAGE_VERSION } from "./version.js";
 
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
@@ -41,8 +42,8 @@ export type ResolvedConfig = {
 export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
   const entity =
     nonEmpty(raw.entity) ??
-    nonEmpty(process.env.USER) ??
-    nonEmpty(process.env.USERNAME);
+    nonEmpty(readPosixUser()) ??
+    nonEmpty(readWindowsUser());
   if (!entity) {
     throw new Error(
       "weave: config.entity is required and could not be defaulted ($USER/$USERNAME unset)",
@@ -94,7 +95,7 @@ async function resolveApiKey(
     return { value: t, source: "literal" };
   }
   if (raw.source === "env") {
-    const v = process.env[raw.id]?.trim();
+    const v = readSecretEnv(raw.id);
     if (!v) throw new Error(`weave: SecretRef env "${raw.id}" is unset or empty`);
     return { value: v, source: `env:${raw.id}` };
   }
