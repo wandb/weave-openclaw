@@ -3,37 +3,39 @@
 // SPDX-PackageName: weave-openclaw
 
 import type { HandlerDeps } from "../deps.js";
+import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
 
-export function createCompactionHookHandlers(deps: HandlerDeps) {
+export function createCompactionHookHandlers(deps: HandlerDeps): {
+  before_compaction: HookHandler<"before_compaction">;
+  after_compaction: HookHandler<"after_compaction">;
+} {
   return {
-    before_compaction(event: any, ctx: any): void {
-      const runId: string | undefined = ctx?.runId;
+    before_compaction(
+      event: HookEvent<"before_compaction">,
+      ctx: HookCtx<"before_compaction">,
+    ): void {
+      const runId = ctx.runId;
       if (!runId) return;
-      deps.pendingCompactionByRun.set(runId, {
-        itemsBefore: typeof event.messageCount === "number" ? event.messageCount : 0,
-      });
+      deps.pendingCompactionByRun.set(runId, { itemsBefore: event.messageCount });
     },
 
-    after_compaction(event: any, ctx: any): void {
-      const runId: string | undefined = ctx?.runId;
+    after_compaction(
+      event: HookEvent<"after_compaction">,
+      ctx: HookCtx<"after_compaction">,
+    ): void {
+      const runId = ctx.runId;
       if (!runId) return;
+
       const turn = deps.registries.turns.get(runId);
       if (!turn) return;
+
       const before = deps.pendingCompactionByRun.get(runId);
       deps.pendingCompactionByRun.delete(runId);
-      const itemsBefore =
-        before?.itemsBefore ??
-        (typeof event.messageCount === "number" && typeof event.compactedCount === "number"
-          ? event.messageCount + event.compactedCount
-          : typeof event.messageCount === "number"
-            ? event.messageCount
-            : 0);
-      const itemsAfter = typeof event.messageCount === "number" ? event.messageCount : 0;
-      const tokens = typeof event.tokenCount === "number" ? event.tokenCount : 0;
+
       turn.addEvent("context_compacted", {
-        items_before: itemsBefore,
-        items_after: itemsAfter,
-        tokens,
+        items_before: before?.itemsBefore ?? event.messageCount + event.compactedCount,
+        items_after: event.messageCount,
+        tokens: event.tokenCount ?? 0,
       });
     },
   };

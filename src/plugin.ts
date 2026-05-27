@@ -15,6 +15,7 @@ import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
 import type { HandlerDeps, HandlerLogger } from "./handlers/deps.js";
+import type { HookHandlers } from "./handlers/hook-types.js";
 import { createSessionHookHandlers } from "./handlers/hooks/session.js";
 import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
 import { createToolHookHandlers } from "./handlers/hooks/tool.js";
@@ -47,11 +48,7 @@ export type WeavePlugin = {
   registries: Registries;
   getStatus: () => StatusSnapshot;
   handlers: {
-    // hook handlers stay loosely typed: PluginHookHandlerMap and the
-    // per-event types are referenced by OpenClawPluginApi.on but aren't
-    // re-exported from openclaw's public surface. Typing happens at the
-    // `api.on(...)` boundary in index.ts via inference.
-    hook: Record<string, (event: any, ctx?: any) => void>;
+    hook: HookHandlers;
     diagnostic?: (event: DiagnosticEventPayload, meta: DiagnosticEventMetadata) => void;
   };
 };

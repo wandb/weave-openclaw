@@ -724,12 +724,11 @@ describe("side-channel attrs on Turn", () => {
 
   it("adds message_received as a span event with content when captureContent=true", async () => {
     const { dispatch, finish } = await setupTurn();
-    dispatch.hook("message_received", {
-      runId: "r",
-      from: "user@example.com",
-      channel: "telegram",
-      content: "hello",
-    });
+    dispatch.hook(
+      "message_received",
+      { runId: "r", from: "user@example.com", content: "hello" },
+      { channelId: "telegram" },
+    );
     await endRun(dispatch, finish);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     const ev = turn?.events.find(e => e.name === "message_received");
@@ -738,24 +737,18 @@ describe("side-channel attrs on Turn", () => {
     expect(ev?.attributes?.["weave.message.content"]).toBe("hello");
   });
 
-  it("agent_end stamps final_message as a Turn attribute (not a duplicate event) when content capture is on", async () => {
+  it("agent_end stamps success and duration as Turn attributes (not a duplicate timeline event)", async () => {
     const { dispatch, finish } = await setupTurn();
-    dispatch.hook("agent_end", {
-      runId: "r",
-      success: true,
-      durationMs: 1200,
-      lastAssistantMessage: "all done",
-    });
+    dispatch.hook("agent_end", { runId: "r", success: true, durationMs: 1200, messages: [] });
     await endRun(dispatch, finish);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
-    // The agent_end_summary event was removed — its data is redundant with
+    // The agent_end_summary event was removed: its data is redundant with
     // the Turn's own start/end timestamps and the attributes set below.
     // Agents-tab filters and search need these on the span, not as a
     // synthetic timeline event.
     expect(turn?.events.find(e => e.name === "agent_end_summary")).toBeUndefined();
     expect(turn?.attributes["weave.agent.success"]).toBe(true);
     expect(turn?.attributes["weave.agent.duration_ms"]).toBe(1200);
-    expect(turn?.attributes["weave.agent.final_message"]).toBe("all done");
   });
 });
 
