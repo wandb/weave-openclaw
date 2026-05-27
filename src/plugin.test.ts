@@ -4,7 +4,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { init as weaveInit, getWeaveTracer } from "weave";
+import { init as weaveInit, startTurn } from "weave";
 
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
@@ -54,7 +54,7 @@ beforeEach(async () => {
   // the provider with the plugin's batch config and no test exporter
   // pinned, so the test sees zero spans. The warmup span itself is
   // discarded via reset().
-  getWeaveTracer("warmup").startSpan("warmup").end();
+  startTurn({ agentName: "warmup" }).end();
   exporter.reset();
 });
 

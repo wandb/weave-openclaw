@@ -18,9 +18,11 @@ and `execute_tool` siblings under the same `invoke_agent` root.
 Conversation grouping is via `gen_ai.conversation.id` (mapped from
 OpenClaw's `sessionKey`).
 
-The plugin uses the Weave Node SDK's `getWeaveTracer()` to emit spans
-through the SDK's pre-configured provider, kept separate from the OTel
-global registry. You can run this plugin alongside `diagnostics-otel`:
+The plugin emits spans through the Weave Node SDK's high-level GenAI
+helpers (`startSession`, `startTurn`, `startLLM`, `startTool`,
+`startSubagent`), which route through the SDK's pre-configured tracer
+provider, kept separate from the OTel global registry. You can run
+this plugin alongside `diagnostics-otel`:
 diagnostics-otel keeps exporting to your generic OTLP collector, and
 this plugin sends a Weave-flavored stream to W&B.
 
@@ -166,8 +168,9 @@ run/model errors arrive through `run.completed` with `outcome: "error"`.
 - `message_received` (inbound boundary)
 - `session_start`, `session_end` (session lifecycle)
 
-**Service registered:** wires the Weave Node SDK (`weave.init()` +
-`getWeaveTracer()`) and subscribes to the diagnostic event stream.
+**Service registered:** wires the Weave Node SDK (`weave.init()` plus
+the GenAI lifecycle helpers) and subscribes to the diagnostic event
+stream.
 
 **Configuration:** see `openclaw.plugin.json` for the full schema.
 
