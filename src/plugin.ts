@@ -126,13 +126,6 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       resolved = cfg;
       lifecycle = "running";
       startedAt = Date.now();
-      if (cfg.stripSenderWrapper) {
-        ctx.logger.warn(
-          "weave: config.stripSenderWrapper is set to true but is no longer honored in v2; " +
-            "raw 'Conversation info' / 'Sender' wrappers will appear in gen_ai.input.messages. " +
-            "Remove the field from your config to silence this warning.",
-        );
-      }
       ctx.logger.info(
         `weave: project=${cfg.projectId} service=${cfg.serviceName} agentVersion=${cfg.agentVersion} ` +
           `auth=${cfg.authSource ?? "WANDB_API_KEY env"} captureContent=${cfg.captureContent ? "on" : "off"}`,

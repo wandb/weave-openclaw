@@ -78,7 +78,7 @@ describe("resolveConfig", () => {
     expect(cfg.captureContent).toBe(true);
   });
 
-  it("accepts captureContent v1-style object with enabled=true", async () => {
+  it("accepts captureContent object form with enabled=true", async () => {
     const cfg = await resolveConfig({
       entity: "e",
       project: "p",

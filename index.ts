@@ -9,12 +9,15 @@ import { createWeavePlugin, renderStatus, type WeavePlugin } from "./src/plugin.
 
 // OpenClaw's loader can invoke `register(api)` multiple times for the same
 // plugin (setup phase + runtime phase, hot-reload, plugin re-registration).
-// Cache the plugin instance + diagnostic-listener subscription on globalThis
-// (not module scope — a module re-import would create a fresh module and
-// hand out a fresh plugin instance with empty registries, while the old
-// instance's diagnostic listener would still be live but holding stale
-// state). The plugin instance owns its hookState; one singleton entry on
-// globalThis covers both.
+// Cache the plugin instance + diagnostic-listener subscription on globalThis,
+// not module scope: a module re-import would create a fresh module and hand
+// out a fresh plugin instance with empty registries, while the old instance's
+// diagnostic listener would still be live but holding stale state. The plugin
+// instance owns its hookState; one singleton entry on globalThis covers both.
+//
+// The `.v1` suffix on these Symbol keys is the version of the singleton
+// contract (shape of the cached plugin instance), independent of the plugin's
+// package version. Bump it only if the cached shape changes incompatibly.
 const PLUGIN_GLOBAL_KEY = Symbol.for("weave-openclaw.plugin.v1");
 const DIAGNOSTIC_SUBSCRIBED_KEY = Symbol.for("weave-openclaw.diagnosticSubscribed.v1");
 

@@ -11,10 +11,10 @@ const MIN_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 
 /**
- * Granular sub-flags for `captureContent`. Accepted for compatibility with the
- * v1 config shape (and the plugin manifest's configSchema, which still lists
- * them). v2 honors `enabled` only; the per-field flags are recorded so the
- * plugin can warn if someone tries to use them to selectively disable a field.
+ * Granular sub-flags for `captureContent`. The plugin manifest's configSchema
+ * accepts them, but only `enabled` is honored at runtime; the per-field flags
+ * are recorded so the plugin can warn if someone tries to use them to
+ * selectively disable a field.
  */
 export type RawCaptureContent = {
   enabled?: boolean;
@@ -35,7 +35,6 @@ export type RawConfig = {
   agentDescription?: string;
   captureContent?: boolean | "on" | "off" | RawCaptureContent;
   flushIntervalMs?: number;
-  stripSenderWrapper?: boolean;
   apiKey?: string | SecretRef;
 };
 
@@ -50,7 +49,6 @@ export type ResolvedConfig = {
   agentDescription?: string;
   captureContent: boolean;
   flushIntervalMs: number;
-  stripSenderWrapper: boolean;
   apiKey?: string;
   authSource?: string;
 };
@@ -87,7 +85,6 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
     agentDescription: raw.agentDescription,
     captureContent,
     flushIntervalMs,
-    stripSenderWrapper: raw.stripSenderWrapper === true,
     apiKey: apiKey?.value,
     authSource: apiKey?.source,
   };
@@ -98,7 +95,7 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
  * on) so traces are useful out of the box. Accepted shapes:
  *   - `true` / `"on"` / undefined  -> true
  *   - `false` / `"off"`            -> false
- *   - `{ enabled: false, ... }`    -> false (other sub-flags ignored in v2)
+ *   - `{ enabled: false, ... }`    -> false (other sub-flags are ignored)
  *   - any other object             -> true (treated as "capture on")
  */
 function resolveCaptureContent(raw: RawConfig["captureContent"]): boolean {

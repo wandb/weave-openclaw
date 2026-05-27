@@ -1,7 +1,7 @@
 {
   "id": "weave",
   "name": "W&B Weave",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Emit OpenClaw agent diagnostic events as OpenTelemetry spans to W&B Weave's Agents OTel endpoint (weave.* attributes, /agents/otel/v1/traces).",
   "activation": {
     "onStartup": true
@@ -58,7 +58,7 @@
         "description": "weave.agent.description attribute."
       },
       "captureContent": {
-        "description": "Conversation content captured into spans. Defaults to ON so traces are useful out of the box. Pass `false` or `\"off\"` for a hard off (compliance/retention policy). The object form is accepted for backwards compatibility with v1 configs; in v2 only the `enabled` field is honored (the granular sub-flags are no-ops). Captured content is NOT redacted by the plugin — operators are expected to scrub upstream if needed.",
+        "description": "Conversation content captured into spans. Defaults to ON so traces are useful out of the box. Pass `false` or `\"off\"` for a hard off (compliance/retention policy). The object form is accepted as an alternative spelling; only the `enabled` field is honored (the granular sub-flags are no-ops). Captured content is NOT redacted by the plugin; operators are expected to scrub upstream if needed.",
         "default": true,
         "oneOf": [
           { "type": "boolean" },
@@ -81,11 +81,6 @@
         "type": "integer",
         "minimum": 1000,
         "default": 5000
-      },
-      "stripSenderWrapper": {
-        "type": "boolean",
-        "default": false,
-        "description": "DEPRECATED in v2 (no-op). Setting this to true logs a one-line warning at start; the field will be removed in v3. v1 used this to strip OpenClaw's metadata-wrapper prefix from user messages; v2 emits the raw `gen_ai.input.messages` content per OTel semconv."
       }
     }
   },
@@ -93,10 +88,6 @@
     "enabled": { "label": "Enable Weave export" },
     "entity": { "label": "W&B Entity (team/user)" },
     "project": { "label": "W&B Project" },
-    "stripSenderWrapper": {
-      "label": "Strip Sender wrapper",
-      "help": "Cleaner chat view at the cost of fidelity to what the LLM actually saw."
-    },
     "captureContent": {
       "label": "Capture conversation content",
       "help": "On by default — empty traces aren't useful. Set to false (or \"off\") when compliance/retention policy requires it. Content is not redacted by the plugin; scrub upstream if needed."

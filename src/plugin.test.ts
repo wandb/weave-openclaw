@@ -860,11 +860,10 @@ describe("subagent and compaction", () => {
   });
 });
 
-// Targeted regression tests for the design-pressure points Tim flagged in
-// the v2 PR review (#9). Concurrent-runs and hot-reload exercise the
-// ambient-state and lifecycle invariants the rest of the suite assumes.
-// Surplus-text covers the closeRunChatSpans fallback that was previously
-// silent.
+// Targeted regression tests for design-pressure points: concurrent-runs and
+// hot-reload exercise the ambient-state and lifecycle invariants the rest of
+// the suite assumes. Surplus-text covers the closeRunChatSpans fallback that
+// was previously silent.
 describe("concurrent runs", () => {
   it("two interleaved runs each get their own Turn / LLM / Tool spans without colliding on the SDK's ambient state", async () => {
     const { plugin, dispatch, finish } = await bootPlugin();
