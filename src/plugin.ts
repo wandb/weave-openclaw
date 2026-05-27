@@ -26,6 +26,16 @@ import { createToolDiagnosticHandlers } from "./handlers/diagnostic/tool.js";
 import { createUsageDiagnosticHandlers } from "./handlers/diagnostic/usage.js";
 import { createContextDiagnosticHandlers } from "./handlers/diagnostic/context.js";
 
+// W&B Cloud's default API host. WANDB_BASE_URL is set to this (or unset) for
+// the public cloud install; dedicated installs override it to their own host.
+const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
+
+// The Weave UI uses a sibling host to the API base. We only know how to derive
+// a UI URL for W&B Cloud; dedicated installs go through a different routing
+// scheme that the plugin can't infer here, so we leave uiUrl undefined and let
+// the operator look it up themselves.
+const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
+
 export type CreateWeavePluginParams = {
   pluginConfig?: unknown;
   hookState: WeaveHookState;
@@ -154,8 +164,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     if (resolved) {
       const wandbBase = process.env.WANDB_BASE_URL?.trim();
       const uiUrl =
-        !wandbBase || wandbBase === "https://api.wandb.ai"
-          ? `https://wandb.ai/${resolved.projectId}/weave`
+        !wandbBase || wandbBase === WANDB_CLOUD_API_BASE_URL
+          ? `${WANDB_CLOUD_UI_BASE_URL}/${resolved.projectId}/weave`
           : undefined;
       snap.config = {
         projectId: resolved.projectId,

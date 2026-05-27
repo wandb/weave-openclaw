@@ -13,7 +13,7 @@ const exporter = new InMemorySpanExporter();
 beforeEach(async () => {
   exporter.reset();
   process.env.WANDB_API_KEY = "test";
-  await weaveInit("rgao/test", {
+  await weaveInit("test-entity/test-project", {
     genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
   });
   // Warmup forces the SDK's lazy provider build NOW so the cached
@@ -43,7 +43,7 @@ describe("end-to-end smoke", () => {
   it("emits a clean trace for a session + run + chat + tool sequence", async () => {
     const hookState = createWeaveHookState();
     const plugin = createWeavePlugin({
-      pluginConfig: { entity: "rgao", project: "test", apiKey: "k", captureContent: true, agentName: "test-agent" },
+      pluginConfig: { entity: "test-entity", project: "test-project", apiKey: "k", captureContent: true, agentName: "test-agent" },
       hookState,
     });
     await plugin.service.start({ logger: makeLogger() } as any);
@@ -163,7 +163,7 @@ describe("end-to-end smoke", () => {
   it("multi-model-call attempt: both chat spans get their content", async () => {
     const hookState = createWeaveHookState();
     const plugin = createWeavePlugin({
-      pluginConfig: { entity: "rgao", project: "test", apiKey: "k", captureContent: true, agentName: "test-agent" },
+      pluginConfig: { entity: "test-entity", project: "test-project", apiKey: "k", captureContent: true, agentName: "test-agent" },
       hookState,
     });
     await plugin.service.start({ logger: makeLogger() } as any);
