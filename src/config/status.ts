@@ -19,27 +19,27 @@ export type StatusSnapshot = {
   counts?: { turns: number; calls: number; tools: number; subagents: number };
 };
 
-export function formatStatus(s: StatusSnapshot): string {
+export function formatStatus(snapshot: StatusSnapshot): string {
   const lines: string[] = [];
-  lines.push(`weave: pluginVersion=${s.pluginVersion}`);
-  const lifecyclePart = s.lifecycleDetail
-    ? `lifecycle=${s.lifecycle} (${s.lifecycleDetail})`
-    : `lifecycle=${s.lifecycle}`;
-  const startedPart = s.startedAt
-    ? ` started=${new Date(s.startedAt).toISOString()}`
+  lines.push(`weave: pluginVersion=${snapshot.pluginVersion}`);
+  const lifecyclePart = snapshot.lifecycleDetail
+    ? `lifecycle=${snapshot.lifecycle} (${snapshot.lifecycleDetail})`
+    : `lifecycle=${snapshot.lifecycle}`;
+  const startedPart = snapshot.startedAt
+    ? ` started=${new Date(snapshot.startedAt).toISOString()}`
     : "";
   lines.push(`       ${lifecyclePart}${startedPart}`);
-  if (s.config) {
-    const c = s.config;
-    lines.push(`       project=${c.projectId} service=${c.serviceName} agentVersion=${c.agentVersion}`);
+  if (snapshot.config) {
+    const config = snapshot.config;
+    lines.push(`       project=${config.projectId} service=${config.serviceName} agentVersion=${config.agentVersion}`);
     lines.push(
-      `       auth=${c.authSource} flushIntervalMs=${c.flushIntervalMs} captureContent=${c.captureContent ? "on" : "off"}`,
+      `       auth=${config.authSource} flushIntervalMs=${config.flushIntervalMs} captureContent=${config.captureContent ? "on" : "off"}`,
     );
-    if (s.counts) {
-      const k = s.counts;
-      lines.push(`       active: turns=${k.turns} calls=${k.calls} tools=${k.tools} subagents=${k.subagents}`);
+    if (snapshot.counts) {
+      const counts = snapshot.counts;
+      lines.push(`       active: turns=${counts.turns} calls=${counts.calls} tools=${counts.tools} subagents=${counts.subagents}`);
     }
-    if (c.uiUrl) lines.push(`       dashboard ${c.uiUrl}`);
+    if (config.uiUrl) lines.push(`       dashboard ${config.uiUrl}`);
   }
   return lines.join("\n");
 }

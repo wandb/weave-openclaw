@@ -47,10 +47,10 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
 
   for (let i = 0; i < callIds.length; i++) {
     const callId = callIds[i]!;
-    const h = deps.registries.calls.get(callId);
-    if (!h) continue;
+    const handle = deps.registries.calls.get(callId);
+    if (!handle) continue;
     const isLast = i === callIds.length - 1;
-    const capIn = deps.hookState.llmInputs.get(callId);
+    const capturedInput = deps.hookState.llmInputs.get(callId);
     // Positional attribution: i-th chat span gets the i-th assistant text.
     // When lengths don't match we fall back to behavior that preserves the
     // user-visible answer, and the warn above flags it:
@@ -66,18 +66,18 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
     } else if (isLast && texts.length > 0) {
       text = texts[texts.length - 1];
     }
-    const shaped = shapeMessages({ input: capIn, text }, captureContent);
+    const shaped = shapeMessages({ input: capturedInput, text }, captureContent);
     const recordUsage = isLast ? usage : undefined;
     if (shaped.input.length || shaped.output.length || recordUsage) {
-      h.llm.record({
+      handle.llm.record({
         inputMessages: shaped.input,
         outputMessages: shaped.output,
         ...(recordUsage ? { usage: recordUsage } : {}),
       });
     }
-    h.llm.end(
-      h.status === "error"
-        ? { error: new Error(h.errorType ?? "model.call.error") }
+    handle.llm.end(
+      handle.status === "error"
+        ? { error: new Error(handle.errorType ?? "model.call.error") }
         : undefined,
     );
     deps.registries.calls.delete(callId);
@@ -86,43 +86,43 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
 }
 
 function shapeMessages(
-  cap: {
+  capture: {
     input?: { systemPrompt?: string; prompt: string; historyMessages?: unknown[] };
     text?: string;
   },
   captureContent: boolean,
 ): { input: Message[]; output: Message[] } {
   const out: { input: Message[]; output: Message[] } = { input: [], output: [] };
-  if (captureContent && cap.input) {
-    if (cap.input.systemPrompt) {
-      out.input.push({ role: "system", content: cap.input.systemPrompt });
+  if (captureContent && capture.input) {
+    if (capture.input.systemPrompt) {
+      out.input.push({ role: "system", content: capture.input.systemPrompt });
     }
-    if (Array.isArray(cap.input.historyMessages)) {
-      for (const m of cap.input.historyMessages) {
+    if (Array.isArray(capture.input.historyMessages)) {
+      for (const m of capture.input.historyMessages) {
         if (m && typeof m === "object" && "role" in m && "content" in m) {
           out.input.push(m as Message);
         }
       }
     }
-    if (cap.input.prompt) {
-      out.input.push({ role: "user", content: cap.input.prompt });
+    if (capture.input.prompt) {
+      out.input.push({ role: "user", content: capture.input.prompt });
     }
   }
-  if (captureContent && typeof cap.text === "string" && cap.text.length > 0) {
-    out.output.push({ role: "assistant", content: cap.text });
+  if (captureContent && typeof capture.text === "string" && capture.text.length > 0) {
+    out.output.push({ role: "assistant", content: capture.text });
   }
   return out;
 }
 
-function toUsage(u: unknown): Usage | undefined {
-  if (!u || typeof u !== "object") return undefined;
-  const x = u as Record<string, unknown>;
+function toUsage(rawUsage: unknown): Usage | undefined {
+  if (!rawUsage || typeof rawUsage !== "object") return undefined;
+  const fields = rawUsage as Record<string, unknown>;
   const usage: Usage = {
-    inputTokens: typeof x.input === "number" ? x.input : undefined,
-    outputTokens: typeof x.output === "number" ? x.output : undefined,
-    reasoningTokens: typeof x.reasoning === "number" ? x.reasoning : undefined,
-    cacheReadInputTokens: typeof x.cacheRead === "number" ? x.cacheRead : undefined,
-    cacheCreationInputTokens: typeof x.cacheWrite === "number" ? x.cacheWrite : undefined,
+    inputTokens: typeof fields.input === "number" ? fields.input : undefined,
+    outputTokens: typeof fields.output === "number" ? fields.output : undefined,
+    reasoningTokens: typeof fields.reasoning === "number" ? fields.reasoning : undefined,
+    cacheReadInputTokens: typeof fields.cacheRead === "number" ? fields.cacheRead : undefined,
+    cacheCreationInputTokens: typeof fields.cacheWrite === "number" ? fields.cacheWrite : undefined,
   };
   // Drop if nothing useful was set.
   if (

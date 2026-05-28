@@ -29,18 +29,18 @@ export function createUsageDiagnosticHandlers(deps: HandlerDeps) {
       }
       // `usage` is declared required by the type but the runtime sometimes
       // emits the cost-only shape, so guard rather than crash.
-      const u = event.usage;
-      if (u) {
-        setIfInt(turn, "weave.usage.total.input_tokens", u.input);
-        setIfInt(turn, "weave.usage.total.output_tokens", u.output);
-        setIfInt(turn, "weave.usage.total.cache_read.input_tokens", u.cacheRead);
-        setIfInt(turn, "weave.usage.total.cache_creation.input_tokens", u.cacheWrite);
-        setIfInt(turn, "weave.usage.total.tokens", u.total);
+      const usage = event.usage;
+      if (usage) {
+        setIfInt(turn, "weave.usage.total.input_tokens", usage.input);
+        setIfInt(turn, "weave.usage.total.output_tokens", usage.output);
+        setIfInt(turn, "weave.usage.total.cache_read.input_tokens", usage.cacheRead);
+        setIfInt(turn, "weave.usage.total.cache_creation.input_tokens", usage.cacheWrite);
+        setIfInt(turn, "weave.usage.total.tokens", usage.total);
       }
-      const c = event.context;
-      if (c) {
-        setIfInt(turn, "weave.context.budget_tokens", c.limit);
-        setIfInt(turn, "weave.context.used_tokens", c.used);
+      const context = event.context;
+      if (context) {
+        setIfInt(turn, "weave.context.budget_tokens", context.limit);
+        setIfInt(turn, "weave.context.used_tokens", context.used);
       }
     },
   };

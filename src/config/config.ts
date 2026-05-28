@@ -87,19 +87,19 @@ async function resolveApiKey(
   raw: string | SecretRef,
 ): Promise<{ value: string; source: string }> {
   if (typeof raw === "string") {
-    const t = raw.trim();
-    if (!t) throw new Error("weave: apiKey literal is empty");
-    return { value: t, source: "literal" };
+    const trimmed = raw.trim();
+    if (!trimmed) throw new Error("weave: apiKey literal is empty");
+    return { value: trimmed, source: "literal" };
   }
   if (raw.source === "env") {
-    const v = readSecretEnv(raw.id);
-    if (!v) throw new Error(`weave: SecretRef env "${raw.id}" is unset or empty`);
-    return { value: v, source: `env:${raw.id}` };
+    const value = readSecretEnv(raw.id);
+    if (!value) throw new Error(`weave: SecretRef env "${raw.id}" is unset or empty`);
+    return { value, source: `env:${raw.id}` };
   }
   if (raw.source === "file") {
-    const t = (await readFile(raw.id, "utf8")).trim();
-    if (!t) throw new Error(`weave: SecretRef file "${raw.id}" is empty`);
-    return { value: t, source: `file:${raw.id}` };
+    const trimmed = (await readFile(raw.id, "utf8")).trim();
+    if (!trimmed) throw new Error(`weave: SecretRef file "${raw.id}" is empty`);
+    return { value: trimmed, source: `file:${raw.id}` };
   }
   throw new Error(
     `weave: SecretRef source "${(raw as SecretRef).source}" is not supported; use "env" or "file"`,

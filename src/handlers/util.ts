@@ -4,19 +4,19 @@
 
 import type { Turn } from "weave";
 
-export function safeJson(v: unknown): string | undefined {
-  if (v === undefined || v === null) return undefined;
-  if (typeof v === "string") return v;
+export function safeJson(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string") return value;
   try {
-    return JSON.stringify(v);
+    return JSON.stringify(value);
   } catch {
     return undefined;
   }
 }
 
-export function setIfInt(turn: Turn | undefined, key: string, v: unknown): void {
+export function setIfInt(turn: Turn | undefined, key: string, value: unknown): void {
   if (!turn) return;
-  if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
-    turn.setAttribute(key, Math.trunc(v));
+  if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
+    turn.setAttribute(key, Math.trunc(value));
   }
 }

@@ -50,10 +50,10 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
       status: "ok" | "error",
       errorType: string | undefined,
     ): void {
-      const h = deps.registries.calls.get(event.callId);
-      if (!h) return;
-      h.status = status;
-      h.errorType = errorType;
+      const handle = deps.registries.calls.get(event.callId);
+      if (!handle) return;
+      handle.status = status;
+      handle.errorType = errorType;
     },
   };
 }
