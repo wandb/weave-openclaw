@@ -12,7 +12,7 @@ import type { WeaveHookState } from "./state/hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
 import { readWandbBaseUrl } from "./config/env.js";
 import { createRegistries, type Registries } from "./state/registries.js";
-import type { StatusSnapshot } from "./config/status.js";
+import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
 import type { HookHandlers } from "./handlers/hook-types.js";
 
@@ -156,4 +156,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   };
 
   return { service, registries, getStatus, handlers };
+}
+
+export function renderStatus(plugin: WeavePlugin): string {
+  return formatStatus(plugin.getStatus());
 }
