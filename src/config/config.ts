@@ -50,10 +50,10 @@ export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
 
   const apiKey = raw.apiKey ? await resolveApiKey(raw.apiKey) : undefined;
 
-  const flushIntervalMs =
-    typeof raw.flushIntervalMs === "number" && Number.isFinite(raw.flushIntervalMs)
-      ? Math.max(MIN_FLUSH_INTERVAL_MS, Math.trunc(raw.flushIntervalMs))
-      : DEFAULT_FLUSH_INTERVAL_MS;
+  const flushIntervalMs = Math.max(
+    MIN_FLUSH_INTERVAL_MS,
+    raw.flushIntervalMs ?? DEFAULT_FLUSH_INTERVAL_MS,
+  );
 
   return {
     enabled: raw.enabled !== false,
