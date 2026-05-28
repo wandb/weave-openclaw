@@ -1,7 +1,7 @@
 {
   "name": "weave-openclaw",
   "version": "0.0.2",
-  "description": "OpenClaw third-party plugin: emit agent diagnostic events to W&B Weave's Agents OTel endpoint (weave.* attribute namespace).",
+  "description": "OpenClaw third-party plugin: emit agent diagnostic events to W&B Weave's Agents OTel endpoint via the Weave Node SDK (gen_ai.* attribute namespace).",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -35,13 +35,10 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/exporter-trace-otlp-proto": "^0.215.0",
-    "@opentelemetry/resources": "^2.7.0",
-    "@opentelemetry/sdk-trace-base": "^2.7.0",
-    "@opentelemetry/semantic-conventions": "^1.40.0",
     "weave": "file:../weave/sdks/node"
   },
   "devDependencies": {
+    "@opentelemetry/sdk-trace-base": "^1.26.0",
     "@types/node": "^22.10.0",
     "openclaw": ">=2026.4.25",
     "typescript": "^5.6.0",
@@ -52,11 +49,5 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "pnpm test && pnpm build"
-  },
-  "pnpm": {
-    "overrides": {
-      "fast-uri": "^3.1.2",
-      "fast-xml-builder": "^1.1.7"
-    }
   }
 }

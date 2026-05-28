@@ -1,0 +1,159 @@
+// SPDX-FileCopyrightText: 2026 CoreWeave, Inc.
+// SPDX-License-Identifier: MIT
+// SPDX-PackageName: weave-openclaw
+
+import { flushOTel, init as weaveInit, login as weaveLogin } from "weave";
+import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
+import type {
+  DiagnosticEventMetadata,
+  DiagnosticEventPayload,
+} from "openclaw/plugin-sdk/diagnostic-runtime";
+import type { WeaveHookState } from "./state/hook-state.js";
+import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
+import { readWandbBaseUrl } from "./config/env.js";
+import { createRegistries, type Registries } from "./state/registries.js";
+import type { StatusSnapshot } from "./config/status.js";
+import { PACKAGE_VERSION } from "./config/version.js";
+import type { HookHandlers } from "./handlers/hook-types.js";
+
+const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
+const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
+
+export type CreateWeavePluginParams = {
+  pluginConfig?: unknown;
+  hookState: WeaveHookState;
+};
+
+export type WeavePlugin = {
+  service: OpenClawPluginService;
+  registries: Registries;
+  getStatus: () => StatusSnapshot;
+  handlers: {
+    hook: HookHandlers;
+    diagnostic?: (event: DiagnosticEventPayload, meta: DiagnosticEventMetadata) => void;
+  };
+};
+
+export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin {
+  const registries = createRegistries();
+  let resolved: ResolvedConfig | undefined;
+  let lifecycle: StatusSnapshot["lifecycle"] = "not-started";
+  let lifecycleDetail: string | undefined;
+  let startedAt: number | undefined;
+
+  function resetTransientState(): void {
+    registries.sessions.clear();
+    registries.turns.clear();
+    registries.calls.clear();
+    registries.tools.clear();
+    registries.subagents.clear();
+    params.hookState.chatCallsByRun.clear();
+    params.hookState.assistantOutputByRun.clear();
+  }
+
+  const service: OpenClawPluginService = {
+    id: "weave",
+    async start(ctx) {
+      if (lifecycle === "running") resetTransientState();
+      resolved = undefined;
+      startedAt = undefined;
+      lifecycle = "not-started";
+      lifecycleDetail = undefined;
+      let cfg: ResolvedConfig;
+      try {
+        cfg = await resolveConfig((params.pluginConfig ?? {}) as RawConfig);
+      } catch (err) {
+        lifecycle = "config-error";
+        lifecycleDetail = err instanceof Error ? err.message : String(err);
+        ctx.logger.error(`weave: ${lifecycleDetail}`);
+        return;
+      }
+      if (!cfg.enabled) {
+        lifecycle = "disabled";
+        lifecycleDetail = "config.enabled=false";
+        ctx.logger.warn(
+          `weave: configured but disabled (config.enabled=false)`,
+        );
+        return;
+      }
+      if (cfg.apiKey) {
+        try {
+          await weaveLogin(cfg.apiKey, readWandbBaseUrl());
+        } catch (err) {
+          lifecycle = "config-error";
+          lifecycleDetail = err instanceof Error ? err.message : String(err);
+          ctx.logger.error(`weave: login failed: ${lifecycleDetail}`);
+          return;
+        }
+      }
+      try {
+        const client = await weaveInit(cfg.projectId, {
+          genai: { batchOptions: { scheduledDelayMillis: cfg.flushIntervalMs } },
+        });
+        // init() fills the W&B default entity for a bare project; use the resolved id.
+        cfg.projectId = client.projectId;
+      } catch (err) {
+        lifecycle = "config-error";
+        lifecycleDetail = err instanceof Error ? err.message : String(err);
+        ctx.logger.error(`weave: init failed: ${lifecycleDetail}`);
+        return;
+      }
+      resolved = cfg;
+      lifecycle = "running";
+      startedAt = Date.now();
+      ctx.logger.info(
+        `weave: project=${cfg.projectId} service=${cfg.serviceName} agentVersion=${cfg.agentVersion} ` +
+          `auth=${cfg.authSource ?? "WANDB_API_KEY env"} captureContent=${cfg.captureContent ? "on" : "off"}`,
+      );
+    },
+    async stop(ctx) {
+      lifecycle = "stopped";
+      try {
+        await flushOTel();
+      } catch (err) {
+        ctx?.logger?.warn?.(
+          `weave: flushOTel failed during stop: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      resetTransientState();
+    },
+  };
+
+  function getStatus(): StatusSnapshot {
+    const snap: StatusSnapshot = {
+      pluginVersion: PACKAGE_VERSION,
+      lifecycle,
+      lifecycleDetail,
+      startedAt,
+    };
+    if (resolved) {
+      const wandbBase = readWandbBaseUrl();
+      const uiUrl =
+        !wandbBase || wandbBase === WANDB_CLOUD_API_BASE_URL
+          ? `${WANDB_CLOUD_UI_BASE_URL}/${resolved.projectId}/weave`
+          : undefined;
+      snap.config = {
+        projectId: resolved.projectId,
+        serviceName: resolved.serviceName,
+        agentVersion: resolved.agentVersion,
+        flushIntervalMs: resolved.flushIntervalMs,
+        captureContent: resolved.captureContent,
+        authSource: resolved.authSource ?? "WANDB_API_KEY env",
+        uiUrl,
+      };
+      snap.counts = {
+        turns: registries.turns.size,
+        calls: registries.calls.size,
+        tools: registries.tools.size,
+        subagents: registries.subagents.size,
+      };
+    }
+    return snap;
+  }
+
+  const handlers: WeavePlugin["handlers"] = {
+    hook: {},
+  };
+
+  return { service, registries, getStatus, handlers };
+}
