@@ -35,13 +35,15 @@ function makeLogger() {
 // Start a running plugin and a fake event dispatcher for the turn-lifecycle suite.
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
+  const hookState = createWeaveHookState();
   const plugin = createWeavePlugin({
     pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent", ...extraConfig },
-    hookState: createWeaveHookState(),
+    hookState,
   });
   await plugin.service.start({ logger: makeLogger(), config: {} } as any);
   return {
     plugin,
+    hookState,
     dispatch: makeFakeApi(plugin),
     finish: () => plugin.service.stop({ logger: makeLogger() } as any),
   };
@@ -216,5 +218,103 @@ describe("turn lifecycle", () => {
         "weave.outcome": "completed",
       }
     `);
+  });
+});
+
+describe("llm two-signal close", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin();
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  const endRun = (d: any) =>
+    d.diagnostic({ type: "run.completed", ts: 9000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" });
+
+  it("buffers llm_input before model_call_started, promotes it, and closes the chat span with model + usage", async () => {
+    const { dispatch, hookState, finish } = await setupTurn();
+    dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "be helpful" });
+    expect(hookState.pendingLlmInputByRun.has("r")).toBe(true);
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    expect(hookState.pendingLlmInputByRun.has("r")).toBe(false);
+    expect(hookState.llmInputs.has("c-1")).toBe(true);
+    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["hello"], usage: { input: 5, output: 3 } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1500, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "sp2" } });
+    endRun(dispatch);
+    await finish();
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    expect(chat?.attributes["gen_ai.request.model"]).toBe("gpt-4o");
+    expect(chat?.attributes["gen_ai.usage.input_tokens"]).toBe(5);
+    expect(chat?.attributes["gen_ai.usage.output_tokens"]).toBe(3);
+  });
+
+  it("marks the chat span ERROR on model.call.error", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "model.call.error", ts: 1200, runId: "r", callId: "c-1", errorCategory: "ProviderTimeout", trace: { traceId: "t", spanId: "sp2" } });
+    endRun(dispatch);
+    await finish();
+    expect(exporter.getFinishedSpans().find(s => s.name === "chat")?.status.code).toBe(2);
+  });
+});
+
+describe("closeRunChatSpans positional attribution", () => {
+  async function twoCallRun(texts: string[]) {
+    const { dispatch, finish } = await bootPlugin();
+    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" } });
+    for (const callId of ["c-1", "c-2"]) {
+      dispatch.hook("model_call_started", { runId: "r", callId });
+      dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId, model: "gpt-4o", trace: { traceId: "t", spanId: callId, parentSpanId: "sp" } });
+      dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId, trace: { traceId: "t", spanId: callId } });
+    }
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: texts });
+    dispatch.diagnostic({ type: "run.completed", ts: 1500, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" });
+    await finish();
+    return exporter.getFinishedSpans().filter(s => s.name === "chat").map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
+  }
+
+  it("folds surplus texts into the last span and pads scarcity from the last text", async () => {
+    const surplus = await twoCallRun(["call-1-text", "call-2-text", "trailing-overflow"]);
+    expect(surplus.length).toBe(2);
+    expect(surplus[0]).toContain("call-1-text");
+    expect(surplus[0]).not.toContain("trailing-overflow");
+    expect(surplus[1]).toContain("call-2-text");
+    expect(surplus[1]).toContain("trailing-overflow");
+
+    exporter.reset();
+    const scarcity = await twoCallRun(["only-text"]);
+    expect(scarcity.length).toBe(2);
+    expect(scarcity[0]).toContain("only-text");
+    expect(scarcity[1]).toContain("only-text");
+  });
+
+  it("warns when llm_output text count drifts from the tracked chat-span count", async () => {
+    const log = makeLogger();
+    const { createWeavePlugin } = await import("./plugin.js");
+    const { createWeaveHookState } = await import("./state/hook-state.js");
+    const plugin = createWeavePlugin({
+      pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: true },
+      hookState: createWeaveHookState(),
+    });
+    await plugin.service.start({ logger: log, config: {} } as any);
+    const d = plugin.handlers.diagnostic!;
+    const h = plugin.handlers.hook;
+    d({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" } }, { trusted: true });
+    h.model_call_started!({ runId: "r", callId: "c-1" });
+    d({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } }, { trusted: true });
+    d({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "cs1" } }, { trusted: true });
+    h.llm_output!({ runId: "r", assistantTexts: ["a", "b"] }); // 2 texts, 1 tracked span
+    d({ type: "run.completed", ts: 1300, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" }, { trusted: true });
+    await plugin.service.stop({ logger: log } as any);
+    const warned = (log.warn as any).mock.calls.map((c: any[]) => String(c[0])).some((m: string) => m.includes("did not match tracked chat-span count"));
+    expect(warned).toBe(true);
   });
 });
