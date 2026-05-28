@@ -1,7 +1,7 @@
 {
   "id": "weave",
   "name": "W&B Weave",
-  "version": "0.0.2",
+  "version": "0.1.0",
   "description": "Track OpenClaw agent sessions in W&B Weave for observability and debugging.",
   "activation": {
     "onStartup": true
