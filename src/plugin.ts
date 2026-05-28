@@ -24,6 +24,8 @@ import { createLlmHookHandlers } from "./handlers/hooks/llm.js";
 import { createRunDiagnosticHandlers } from "./handlers/diagnostic/run.js";
 import { createChatDiagnosticHandlers } from "./handlers/diagnostic/chat.js";
 import { createToolDiagnosticHandlers } from "./handlers/diagnostic/tool.js";
+import { createUsageDiagnosticHandlers } from "./handlers/diagnostic/usage.js";
+import { createContextDiagnosticHandlers } from "./handlers/diagnostic/context.js";
 
 const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
 const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
@@ -182,6 +184,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   const { onRunStarted, onRunFinalize, onRunAttempt } = createRunDiagnosticHandlers(deps);
   const { onChatStart, onChatFinalize } = createChatDiagnosticHandlers(deps);
   const { onToolStart, onToolFinalize, onToolLoop } = createToolDiagnosticHandlers(deps);
+  const { onModelUsage } = createUsageDiagnosticHandlers(deps);
+  const { onContextAssembled } = createContextDiagnosticHandlers(deps);
 
   const handlers: WeavePlugin["handlers"] = {
     hook: {
@@ -217,6 +221,10 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
           return onToolFinalize(event, "error", "blocked");
         case "tool.loop":
           return onToolLoop(event);
+        case "model.usage":
+          return onModelUsage(event);
+        case "context.assembled":
+          return onContextAssembled(event);
       }
     },
   };
