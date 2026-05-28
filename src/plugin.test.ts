@@ -584,3 +584,73 @@ describe("hot-reload / lifecycle", () => {
     await plugin.service.stop({ logger: makeLogger() } as any);
   });
 });
+
+describe("subagent and compaction", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin();
+    ctx.dispatch.diagnostic({
+      type: "run.started",
+      ts: 1000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+    });
+    return ctx;
+  }
+
+  async function endRun(dispatch: any, finish: () => Promise<void>) {
+    dispatch.diagnostic({
+      type: "run.completed",
+      ts: 9000,
+      runId: "r",
+      sessionKey: "s",
+      trace: { traceId: "t", spanId: "sp" },
+      outcome: "completed",
+    });
+    await finish();
+  }
+
+  it("opens a SubAgent under the requester's Turn with spawned-event attrs; non-ok ends ERROR", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", { runId: "sub-r", agentId: "researcher", label: "search-agent", childSessionKey: "sub-s", mode: "run" }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r", outcome: "ok" });
+    dispatch.hook("subagent_spawned", { runId: "sub-r2", agentId: "broken", childSessionKey: "sub-s2", mode: "run" }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r2", outcome: "killed" });
+    await endRun(dispatch, finish);
+    const spans = exporter.getFinishedSpans();
+    expect(spans.find(s => s.attributes["gen_ai.agent.name"] === "researcher")).toBeDefined();
+    expect(spans.find(s => s.attributes["gen_ai.agent.name"] === "broken")?.status.code).toBe(2);
+    const ev = spans
+      .find(s => s.name === "invoke_agent" && s.events.some(e => e.name === "subagent_spawned"))
+      ?.events.find(e => e.name === "subagent_spawned" && e.attributes?.["weave.agent.id"] === "researcher");
+    expect(ev?.attributes?.["weave.subagent.mode"]).toBe("run");
+    expect(ev?.attributes?.["weave.agent.description"]).toBe("search-agent");
+    expect(ev?.attributes?.["gen_ai.conversation.id"]).toBe("sub-s");
+  });
+
+  it("does not open a subagent when no requester turn exists", async () => {
+    const { plugin, dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", { runId: "sub-orphan", agentId: "orphan", childSessionKey: "ck", mode: "run" }, { runId: "missing" });
+    expect(plugin.registries.subagents.has("sub-orphan")).toBe(false);
+    await endRun(dispatch, finish);
+  });
+
+  it("emits context_compacted with items_before from before_compaction, or inferred when absent", async () => {
+    const a = await setupTurn();
+    a.dispatch.hook("before_compaction", { messageCount: 50, tokenCount: 100000, compactingCount: 40 }, { runId: "r" });
+    a.dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000 }, { runId: "r" });
+    await endRun(a.dispatch, a.finish);
+    let ev = exporter.getFinishedSpans().find(s => s.name === "invoke_agent")?.events.find(e => e.name === "context_compacted");
+    expect(ev?.attributes?.["items_before"]).toBe(50);
+    expect(ev?.attributes?.["items_after"]).toBe(10);
+    expect(ev?.attributes?.["tokens"]).toBe(20000);
+
+    exporter.reset();
+    const b = await setupTurn();
+    b.dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000, compactedCount: 30 }, { runId: "r" });
+    await endRun(b.dispatch, b.finish);
+    ev = exporter.getFinishedSpans().find(s => s.name === "invoke_agent")?.events.find(e => e.name === "context_compacted");
+    expect(ev?.attributes?.["items_before"]).toBe(40);
+    expect(ev?.attributes?.["items_after"]).toBe(10);
+  });
+});

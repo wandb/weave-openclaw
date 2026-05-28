@@ -21,6 +21,8 @@ import { createSessionHookHandlers } from "./handlers/hooks/session.js";
 import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
 import { createToolHookHandlers } from "./handlers/hooks/tool.js";
 import { createLlmHookHandlers } from "./handlers/hooks/llm.js";
+import { createSubagentHookHandlers } from "./handlers/hooks/subagent.js";
+import { createCompactionHookHandlers } from "./handlers/hooks/compaction.js";
 import { createRunDiagnosticHandlers } from "./handlers/diagnostic/run.js";
 import { createChatDiagnosticHandlers } from "./handlers/diagnostic/chat.js";
 import { createToolDiagnosticHandlers } from "./handlers/diagnostic/tool.js";
@@ -181,6 +183,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   const turnHooks = createTurnHookHandlers(deps);
   const toolHooks = createToolHookHandlers(deps);
   const llmHooks = createLlmHookHandlers(deps);
+  const subagentHooks = createSubagentHookHandlers(deps);
+  const compactionHooks = createCompactionHookHandlers(deps);
   const { onRunStarted, onRunFinalize, onRunAttempt } = createRunDiagnosticHandlers(deps);
   const { onChatStart, onChatFinalize } = createChatDiagnosticHandlers(deps);
   const { onToolStart, onToolFinalize, onToolLoop } = createToolDiagnosticHandlers(deps);
@@ -193,6 +197,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       ...turnHooks,
       ...toolHooks,
       ...llmHooks,
+      ...subagentHooks,
+      ...compactionHooks,
     },
     diagnostic(event, meta) {
       if (!meta.trusted) return;
