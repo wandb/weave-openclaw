@@ -14,7 +14,12 @@ import { readWandbBaseUrl } from "./config/env.js";
 import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
+import type { HandlerDeps, HandlerLogger } from "./handlers/deps.js";
 import type { HookHandlers } from "./handlers/hook-types.js";
+import { BoundedMap } from "./util/bounded-map.js";
+import { createSessionHookHandlers } from "./handlers/hooks/session.js";
+import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
+import { createRunDiagnosticHandlers } from "./handlers/diagnostic/run.js";
 
 const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
 const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
@@ -40,6 +45,18 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let lifecycle: StatusSnapshot["lifecycle"] = "not-started";
   let lifecycleDetail: string | undefined;
   let startedAt: number | undefined;
+  const costByRun = new BoundedMap<string, number>();
+  const pendingCompactionByRun = new BoundedMap<string, { itemsBefore: number }>();
+  let logger: HandlerLogger | undefined;
+
+  const deps: HandlerDeps = {
+    registries,
+    hookState: params.hookState,
+    getResolved: () => resolved,
+    getLogger: () => logger,
+    costByRun,
+    pendingCompactionByRun,
+  };
 
   function resetTransientState(): void {
     registries.sessions.clear();
@@ -49,11 +66,14 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     registries.subagents.clear();
     params.hookState.chatCallsByRun.clear();
     params.hookState.assistantOutputByRun.clear();
+    costByRun.clear();
+    pendingCompactionByRun.clear();
   }
 
   const service: OpenClawPluginService = {
     id: "weave",
     async start(ctx) {
+      logger = ctx.logger;
       if (lifecycle === "running") resetTransientState();
       resolved = undefined;
       startedAt = undefined;
@@ -151,8 +171,28 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     return snap;
   }
 
+  const sessionHooks = createSessionHookHandlers(deps);
+  const turnHooks = createTurnHookHandlers(deps);
+  const runDiag = createRunDiagnosticHandlers(deps);
+
   const handlers: WeavePlugin["handlers"] = {
-    hook: {},
+    hook: {
+      ...sessionHooks,
+      ...turnHooks,
+    },
+    diagnostic(event, meta) {
+      if (!meta.trusted) return;
+      // Drop events arriving before start() resolves config.
+      if (!resolved) return;
+      switch (event.type) {
+        case "run.started":
+          return runDiag.onRunStarted(event);
+        case "run.completed":
+          return runDiag.onRunFinalize(event);
+        case "run.attempt":
+          return runDiag.onRunAttempt(event);
+      }
+    },
   };
 
   return { service, registries, getStatus, handlers };

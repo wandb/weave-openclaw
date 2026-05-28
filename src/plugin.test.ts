@@ -32,6 +32,33 @@ function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
+// Start a running plugin and a fake event dispatcher for the turn-lifecycle suite.
+async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
+  const { createWeavePlugin } = await import("./plugin.js");
+  const plugin = createWeavePlugin({
+    pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent", ...extraConfig },
+    hookState: createWeaveHookState(),
+  });
+  await plugin.service.start({ logger: makeLogger(), config: {} } as any);
+  return {
+    plugin,
+    dispatch: makeFakeApi(plugin),
+    finish: () => plugin.service.stop({ logger: makeLogger() } as any),
+  };
+}
+
+function makeFakeApi(plugin: any) {
+  return {
+    hook(name: string, event: any, ctx?: any) {
+      const handler = plugin.handlers.hook[name];
+      if (handler) handler(event, ctx ?? {});
+    },
+    diagnostic(event: any) {
+      plugin.handlers.diagnostic(event, { trusted: true });
+    },
+  };
+}
+
 describe("createWeavePlugin lifecycle", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -80,5 +107,66 @@ describe("createWeavePlugin lifecycle", () => {
     await errored.service.start({ logger: errorLog, config: {} } as any);
     expect(errored.getStatus().lifecycle).toBe("config-error");
     expect(errorLog.error).toHaveBeenCalled();
+  });
+});
+
+describe("turn lifecycle", () => {
+  const trace = { traceId: "t", spanId: "sp" };
+  const started = (d: any, runId: string, sessionKey = "s") =>
+    d.diagnostic({ type: "run.started", ts: 1000, runId, sessionKey, trace });
+  const completed = (d: any, runId: string, outcome = "completed", sessionKey = "s") =>
+    d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
+
+  it("opens the invoke_agent Turn on run.started and ends it (with a default agent name) on run.completed", async () => {
+    const { plugin, dispatch, finish } = await bootPlugin(); // no explicit agentName
+    started(dispatch, "r-1");
+    expect(plugin.registries.turns.has("r-1")).toBe(true);
+    completed(dispatch, "r-1");
+    await finish();
+    expect(plugin.registries.turns.has("r-1")).toBe(false);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    expect(turn).toBeDefined();
+    expect(turn?.attributes["gen_ai.agent.name"]).toBeTruthy();
+  });
+
+  it("maps outcome to span status: aborted stays OK, failed marks ERROR (weave.outcome stamped)", async () => {
+    const { dispatch, finish } = await bootPlugin();
+    started(dispatch, "r-ok", "s-ok");
+    completed(dispatch, "r-ok", "aborted", "s-ok");
+    started(dispatch, "r-bad", "s-bad");
+    completed(dispatch, "r-bad", "failed", "s-bad");
+    await finish();
+    const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
+    const aborted = spans.find(s => s.attributes["weave.outcome"] === "aborted");
+    const failed = spans.find(s => s.attributes["weave.outcome"] === "failed");
+    expect(aborted?.status.code).not.toBe(2); // user-cancel must not count as error
+    expect(failed?.status.code).toBe(2);
+  });
+
+  it("opens and closes a Session on session_start / session_end", async () => {
+    const { plugin, dispatch, finish } = await bootPlugin();
+    dispatch.hook("session_start", { sessionKey: "s-1" });
+    expect(plugin.registries.sessions.has("s-1")).toBe(true);
+    dispatch.hook("session_end", { sessionKey: "s-1" });
+    expect(plugin.registries.sessions.has("s-1")).toBe(false);
+    await finish();
+  });
+
+  it("agent_end stamps success/duration (omits success when absent, honors false)", async () => {
+    const { dispatch, finish } = await bootPlugin();
+    started(dispatch, "r-yes");
+    dispatch.hook("agent_end", { runId: "r-yes", success: true, durationMs: 1500 });
+    completed(dispatch, "r-yes");
+    started(dispatch, "r-absent");
+    dispatch.hook("agent_end", { runId: "r-absent", durationMs: 100 });
+    completed(dispatch, "r-absent");
+    started(dispatch, "r-false");
+    dispatch.hook("agent_end", { runId: "r-false", success: false });
+    completed(dispatch, "r-false");
+    await finish();
+    const spans = exporter.getFinishedSpans();
+    expect(spans.find(s => s.attributes["weave.agent.duration_ms"] === 1500)?.attributes["weave.agent.success"]).toBe(true);
+    expect(spans.find(s => s.attributes["weave.agent.duration_ms"] === 100)?.attributes["weave.agent.success"]).toBeUndefined();
+    expect(spans.some(s => s.attributes["weave.agent.success"] === false)).toBe(true);
   });
 });
