@@ -3,28 +3,18 @@
 // SPDX-PackageName: weave-openclaw
 
 /**
- * Every `process.env` read or write in this plugin goes through this module.
+ * Every `process.env` read in this plugin goes through this module.
  *
  * Centralizing the env surface lets a reader see the full set of environment
  * variables the plugin touches in one file, and gives tests a single boundary
  * to stub. The Weave Node SDK reads `WANDB_API_KEY`, `WANDB_BASE_URL`, and
- * `~/.netrc` on its own; the plugin's job here is the OpenClaw side: the
- * operator's resolved config gets stamped into `WANDB_API_KEY` so the SDK can
- * pick it up at `init()`.
+ * `~/.netrc` on its own; when the operator supplies an apiKey via plugin
+ * config, the plugin hands it to the SDK's `login()` which owns the env stamp
+ * and any netrc write.
  *
  * Accessors are functions (not exported constants) so tests that mutate
  * `process.env` between resolves see the updated values.
  */
-
-/** Read `WANDB_API_KEY` for an existence check or to hand to the SDK. */
-export function readWandbApiKey(): string | undefined {
-  return process.env.WANDB_API_KEY;
-}
-
-/** Stamp the operator-resolved API key into env so the SDK's init() reads it. */
-export function setWandbApiKey(value: string): void {
-  process.env.WANDB_API_KEY = value;
-}
 
 /** W&B API host. Unset for the public cloud default; dedicated installs override. */
 export function readWandbBaseUrl(): string | undefined {

@@ -2,11 +2,18 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { init as weaveInit, startTurn } from "weave";
 import { createWeavePlugin } from "./plugin.js";
 import { createWeaveHookState } from "./state/hook-state.js";
+
+// See plugin.test.ts for the rationale: we do not want the smoke to touch
+// the real trace server or the developer's ~/.netrc.
+vi.mock("weave", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("weave")>();
+  return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
+});
 
 const exporter = new InMemorySpanExporter();
 

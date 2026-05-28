@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { flushOTel, init as weaveInit } from "weave";
+import { flushOTel, init as weaveInit, login as weaveLogin } from "weave";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type {
   DiagnosticEventMetadata,
@@ -10,7 +10,7 @@ import type {
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { WeaveHookState } from "./state/hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
-import { readWandbApiKey, readWandbBaseUrl, setWandbApiKey } from "./config/env.js";
+import { readWandbBaseUrl } from "./config/env.js";
 import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
@@ -113,15 +113,25 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         return;
       }
       if (cfg.apiKey) {
-        setWandbApiKey(cfg.apiKey);
-      } else if (!readWandbApiKey()) {
-        lifecycle = "config-error";
-        lifecycleDetail = "no W&B API key found";
-        ctx.logger.error(
-          `weave: ${lifecycleDetail} (set WANDB_API_KEY env or weave.apiKey config)`,
-        );
-        return;
+        // login() verifies the key against the trace server, best-effort
+        // writes ~/.netrc, then sets WANDB_API_KEY env so the upcoming
+        // init() picks it up. A bad key or unreachable trace server here
+        // surfaces as config-error at start rather than later as a silent
+        // export failure.
+        try {
+          await weaveLogin(cfg.apiKey, readWandbBaseUrl());
+        } catch (err) {
+          lifecycle = "config-error";
+          lifecycleDetail = err instanceof Error ? err.message : String(err);
+          ctx.logger.error(`weave: login failed: ${lifecycleDetail}`);
+          return;
+        }
       }
+      // No early env check: the SDK's init() resolves the key from
+      // WANDB_API_KEY env or ~/.netrc on its own, so operators who ran
+      // `wandb login` previously work without also setting env. The catch
+      // around init() below surfaces an SDK-side "key not found" as
+      // config-error.
       try {
         await weaveInit(cfg.projectId, {
           genai: { batchOptions: { scheduledDelayMillis: cfg.flushIntervalMs } },

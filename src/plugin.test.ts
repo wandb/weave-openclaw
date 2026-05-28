@@ -6,6 +6,14 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { init as weaveInit, startTurn } from "weave";
 
+// Neutralize weave.login so tests don't hit the live trace server or
+// scribble into the developer's ~/.netrc. Real auth is exercised by the
+// gateway smoke; unit tests just need the plugin to reach init().
+vi.mock("weave", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("weave")>();
+  return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
+});
+
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
   const { createWeaveHookState } = await import("./state/hook-state.js");
