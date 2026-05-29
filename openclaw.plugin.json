@@ -9,6 +9,7 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
+    "required": ["project"],
     "properties": {
       "enabled": {
         "type": "boolean",
@@ -21,7 +22,7 @@
       },
       "project": {
         "type": "string",
-        "description": "W&B project name. Optional: when omitted the plugin defaults to 'openclaw-default' and logs a dev-defaults warning — set explicitly for production.",
+        "description": "W&B project name. Required; the plugin throws on startup if unset.",
         "minLength": 1
       },
       "apiKey": {

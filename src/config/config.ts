@@ -11,10 +11,13 @@ const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 const MIN_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 
+// Raw plugin settings from openclaw.plugin.json. `project` is required (resolveConfig throws when
+// unset/empty). `entity` is optional: left undefined when unset so the Weave SDK resolves the
+// account's default entity, never $USER. resolveConfig() applies defaults for the rest.
 export type RawConfig = {
   enabled?: boolean;
   entity?: string;
-  project?: string;
+  project: string;
   serviceName?: string;
   agentName?: string;
   agentVersion?: string;
@@ -41,7 +44,8 @@ export type ResolvedConfig = {
 
 export async function resolveConfig(raw: RawConfig): Promise<ResolvedConfig> {
   const entity = raw.entity?.trim() || undefined;
-  const project = raw.project || "openclaw-default";
+  const project = raw.project?.trim();
+  if (!project) throw new Error("weave: project is required; set it in the plugin config");
 
   const apiKey = raw.apiKey ? await resolveApiKey(raw.apiKey) : undefined;
 
