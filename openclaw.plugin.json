@@ -26,7 +26,7 @@
         "minLength": 1
       },
       "apiKey": {
-        "description": "W&B API key. String literal (discouraged), or a { source, provider, id } SecretRef (source env or file). Omit to let the Weave SDK resolve credentials from WANDB_API_KEY or netrc.",
+        "description": "W&B API key. String literal (discouraged), or a { source, provider, id } SecretRef resolved through OpenClaw's secret providers (env works out of the box; file/exec require a configured provider). Omit to let the Weave SDK resolve credentials from WANDB_API_KEY or netrc.",
         "oneOf": [
           { "type": "string" },
           {
@@ -34,7 +34,7 @@
             "additionalProperties": false,
             "required": ["source", "provider", "id"],
             "properties": {
-              "source": { "type": "string", "enum": ["env", "file"] },
+              "source": { "type": "string", "enum": ["env", "file", "exec"] },
               "provider": { "type": "string", "minLength": 1 },
               "id": { "type": "string", "minLength": 1 }
             }
