@@ -52,7 +52,7 @@
       },
       "agentVersion": {
         "type": "string",
-        "description": "weave.agent.version attribute. Set 'auto' to generate <pkgVersion>+<startupTimestamp> on every gateway restart so each plugin build/restart is a distinct version row in the Agents tab. Leave unset to use the plugin package version. Set an explicit string (e.g. 'v0.1') to pin."
+        "description": "weave.agent.version attribute. Leave unset to use the plugin package version, or set an explicit string (e.g. 'v0.1') to pin."
       },
       "agentDescription": {
         "type": "string",

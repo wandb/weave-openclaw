@@ -68,9 +68,6 @@ describe("resolveConfig", () => {
 
     expect((await resolveConfig({ ...base, captureContent: false }, ctx())).captureContent).toBe(false);
 
-    const auto = await resolveConfig({ ...base, agentVersion: "auto" }, ctx());
-    expect(auto.agentVersion).toMatch(/^[^+]+\+\d{14}$/);
-
     expect((await resolveConfig({ ...base, flushIntervalMs: 200 }, ctx())).flushIntervalMs).toBe(1000);
   });
 });

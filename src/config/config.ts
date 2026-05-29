@@ -70,25 +70,13 @@ export async function resolveConfig(raw: RawConfig, ctx: ResolveContext): Promis
     projectId: `${entity}/${project}`,
     serviceName: raw.serviceName || DEFAULT_SERVICE_NAME,
     agentName: raw.agentName,
-    agentVersion: resolveAgentVersion(raw.agentVersion),
+    agentVersion: raw.agentVersion || PACKAGE_VERSION,
     agentDescription: raw.agentDescription,
     captureContent: raw.captureContent !== false,
     flushIntervalMs,
     apiKey: apiKey?.value,
     authSource: apiKey?.source,
   };
-}
-
-function resolveAgentVersion(raw: string | undefined): string {
-  if (!raw) return PACKAGE_VERSION;
-  if (raw === "auto") {
-    const ts = new Date()
-      .toISOString()
-      .replace(/[-:T]/g, "")
-      .replace(/\.\d{3}Z$/, "");
-    return `${PACKAGE_VERSION}+${ts}`;
-  }
-  return raw;
 }
 
 // Resolve a literal or SecretRef apiKey via OpenClaw's secret resolver, which reads env/file/exec
