@@ -40,7 +40,7 @@ jobs:
 
           PACKAGE_VERSION="$(node -p "JSON.parse(require('fs').readFileSync('package.json', 'utf8')).version")"
           PLUGIN_VERSION="$(node -p "JSON.parse(require('fs').readFileSync('openclaw.plugin.json', 'utf8')).version")"
-          SERVICE_VERSION="$(node -p "(require('fs').readFileSync('src/version.ts','utf8').match(/PACKAGE_VERSION\\s*=\\s*\"([^\"]+)\"/)||[])[1] || ''")"
+          SERVICE_VERSION="$(node -p "(require('fs').readFileSync('src/config/version.ts','utf8').match(/PACKAGE_VERSION\\s*=\\s*\"([^\"]+)\"/)||[])[1] || ''")"
 
           if [ "${RELEASE_REF}" != "v${PACKAGE_VERSION}" ]; then
             echo "::error::Tag ${RELEASE_REF} does not match package.json version v${PACKAGE_VERSION}"
@@ -53,7 +53,7 @@ jobs:
           fi
 
           if [ "${SERVICE_VERSION}" != "${PACKAGE_VERSION}" ]; then
-            echo "::error::src/version.ts PACKAGE_VERSION (${SERVICE_VERSION}) does not match package.json (${PACKAGE_VERSION})"
+            echo "::error::src/config/version.ts PACKAGE_VERSION (${SERVICE_VERSION}) does not match package.json (${PACKAGE_VERSION})"
             exit 1
           fi
 

@@ -17,19 +17,66 @@
       },
       "entity": {
         "type": "string",
-        "description": "W&B team or username slug.",
+        "description": "W&B team or username slug. Required; the plugin throws on startup if unset.",
         "minLength": 1
       },
       "project": {
         "type": "string",
-        "description": "W&B project name.",
+        "description": "W&B project name. Required; the plugin throws on startup if unset.",
         "minLength": 1
+      },
+      "apiKey": {
+        "description": "W&B API key. String literal (discouraged), or a { source, provider, id } SecretRef resolved through OpenClaw's secret providers (env works out of the box; file/exec require a configured provider). Omit to let the Weave SDK resolve credentials from WANDB_API_KEY or netrc.",
+        "oneOf": [
+          { "type": "string" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source", "provider", "id"],
+            "properties": {
+              "source": { "type": "string", "enum": ["env", "file", "exec"] },
+              "provider": { "type": "string", "minLength": 1 },
+              "id": { "type": "string", "minLength": 1 }
+            }
+          }
+        ]
+      },
+      "serviceName": {
+        "type": "string",
+        "default": "openclaw-agent",
+        "description": "Surfaced in `/weave status` for operator visibility. Not currently stamped onto the OTel resource by the Weave Node SDK; tracked separately."
+      },
+      "agentName": {
+        "type": "string",
+        "description": "Override for weave.agent.name. Falls back to harnessId/pluginId from events."
+      },
+      "agentVersion": {
+        "type": "string",
+        "description": "weave.agent.version attribute. Leave unset to use the plugin package version, or set an explicit string (e.g. 'v0.1') to pin."
+      },
+      "agentDescription": {
+        "type": "string",
+        "description": "weave.agent.description attribute."
+      },
+      "captureContent": {
+        "type": "boolean",
+        "default": true,
+        "description": "Conversation content captured into spans. Defaults to true so traces are useful out of the box. Set to false for a hard off (compliance/retention policy). Captured content is NOT redacted by the plugin; operators are expected to scrub upstream if needed."
+      },
+      "flushIntervalMs": {
+        "type": "integer",
+        "minimum": 1000,
+        "default": 5000
       }
     }
   },
   "uiHints": {
     "enabled": { "label": "Enable Weave export" },
     "entity": { "label": "W&B Entity (team/user)" },
-    "project": { "label": "W&B Project" }
+    "project": { "label": "W&B Project" },
+    "captureContent": {
+      "label": "Capture conversation content",
+      "help": "On by default; empty traces aren't useful. Set to false when compliance or retention policy requires it. Content is not redacted by the plugin; scrub upstream if needed."
+    }
   }
 }
