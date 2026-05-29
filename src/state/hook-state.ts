@@ -7,23 +7,23 @@ import { BoundedMap } from "../util/bounded-map.js";
 // Capture buffers shared between hooks and the diagnostic service: hooks hold
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
 
-export type LlmInputCapture = {
+type LlmInputCapture = {
   systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];
 };
 
-export type ToolCallArgsCapture = {
+type ToolCallArgsCapture = {
   toolName: string;
   params: Record<string, unknown>;
   runId?: string;
 };
 
-export type ToolCallResultCapture = {
+type ToolCallResultCapture = {
   result?: unknown;
 };
 
-export type AssistantOutputBuffer = {
+type AssistantOutputBuffer = {
   texts: string[];
   usage?: unknown;
 };
@@ -33,8 +33,8 @@ export type WeaveHookState = {
   currentCallByRun: BoundedMap<string, string>;
   // llm_input that arrived before model_call_started; promoted once callId is known
   pendingLlmInputByRun: BoundedMap<string, LlmInputCapture>;
-  toolCallArgs: BoundedMap<string, ToolCallArgsCapture>;
-  toolCallResults: BoundedMap<string, ToolCallResultCapture>;
+  toolCallArgs: BoundedMap<string, ToolCallArgsCapture>; // keyed by toolCallId
+  toolCallResults: BoundedMap<string, ToolCallResultCapture>; // keyed by toolCallId
   chatCallsByRun: BoundedMap<string, string[]>;
   assistantOutputByRun: BoundedMap<string, AssistantOutputBuffer>;
 };

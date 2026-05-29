@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-export const BOUNDED_MAP_CAP = 4096;
+const BOUNDED_MAP_CAP = 4096;
 
 // FIFO-bounded Map: a new key at capacity evicts the oldest entry. Typed as
 // BoundedMap (not Map) so the bound is visible at each declaration.
