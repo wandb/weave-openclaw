@@ -45,7 +45,7 @@ export type ResolvedConfig = {
 
 // Resolution dependencies from the plugin service start context (ctx.config), needed so SecretRef
 // apiKeys go through OpenClaw's configured secret providers instead of being read by hand.
-export type ResolveContext = {
+type ResolveContext = {
   config: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
 };
