@@ -26,7 +26,7 @@
         "minLength": 1
       },
       "apiKey": {
-        "description": "W&B API key. String literal (discouraged), { source, provider, id } SecretRef shape, or omit to read WANDB_API_KEY from env.",
+        "description": "W&B API key. String literal (discouraged), or a { source, provider, id } SecretRef (source env or file). Omit to let the Weave SDK resolve credentials from WANDB_API_KEY or netrc.",
         "oneOf": [
           { "type": "string" },
           {
