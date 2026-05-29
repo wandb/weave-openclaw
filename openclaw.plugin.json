@@ -9,7 +9,7 @@
   "configSchema": {
     "type": "object",
     "additionalProperties": false,
-    "required": ["project"],
+    "required": ["entity", "project"],
     "properties": {
       "enabled": {
         "type": "boolean",
@@ -17,7 +17,7 @@
       },
       "entity": {
         "type": "string",
-        "description": "W&B team or username slug. Optional: when omitted, the W&B default entity for the authenticated account is used.",
+        "description": "W&B team or username slug. Required; the plugin throws on startup if unset.",
         "minLength": 1
       },
       "project": {
