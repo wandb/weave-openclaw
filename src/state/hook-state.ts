@@ -30,13 +30,13 @@ type AssistantOutputBuffer = {
 
 export type WeaveHookState = {
   llmInputs: BoundedMap<string, LlmInputCapture>; // keyed by callId, not runId
-  currentCallByRun: BoundedMap<string, string>;
+  currentCallByRun: BoundedMap<string, string>; // keyed by runId
   // llm_input that arrived before model_call_started; promoted once callId is known
-  pendingLlmInputByRun: BoundedMap<string, LlmInputCapture>;
+  pendingLlmInputByRun: BoundedMap<string, LlmInputCapture>; // keyed by runId
   toolCallArgs: BoundedMap<string, ToolCallArgsCapture>; // keyed by toolCallId
   toolCallResults: BoundedMap<string, ToolCallResultCapture>; // keyed by toolCallId
-  chatCallsByRun: BoundedMap<string, string[]>;
-  assistantOutputByRun: BoundedMap<string, AssistantOutputBuffer>;
+  chatCallsByRun: BoundedMap<string, string[]>; // keyed by runId
+  assistantOutputByRun: BoundedMap<string, AssistantOutputBuffer>; // keyed by runId
 };
 
 export function createWeaveHookState(): WeaveHookState {

@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
+// Per-map entry cap. Set far above the realistic count of concurrently-open
+// spans, so eviction never drops a live handle in normal operation and only
+// bounds the worst-case leak from a dropped or crashed close event.
 const BOUNDED_MAP_CAP = 4096;
 
 // FIFO-bounded Map: a new key at capacity evicts the oldest entry. Typed as
