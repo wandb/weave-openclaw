@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, assert } from "vitest";
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { init as weaveInit, startTurn } from "weave";
+import { createWeaveHookState } from "./state/hook-state.js";
 
 // Stub weave.login so tests don't hit the live server or write ~/.netrc.
 vi.mock("weave", async (importOriginal) => {
@@ -14,13 +15,12 @@ vi.mock("weave", async (importOriginal) => {
 
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
-  const { createWeaveHookState } = await import("./state/hook-state.js");
   const hookState = createWeaveHookState();
   const plugin = createWeavePlugin({
     pluginConfig: { entity: "e", project: "p", apiKey: "k", ...extraConfig },
     hookState,
   });
-  await plugin.service.start({ logger: makeLogger() } as any);
+  await plugin.service.start({ logger: makeLogger(), config: {} } as any);
   const dispatch = makeFakeApi(plugin);
   return {
     plugin,
@@ -60,18 +60,6 @@ function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
 }
 
-function emptyHookState() {
-  return {
-    llmInputs: new Map(),
-    currentCallByRun: new Map(),
-    pendingLlmInputByRun: new Map(),
-    toolCallArgs: new Map(),
-    toolCallResults: new Map(),
-    chatCallsByRun: new Map(),
-    assistantOutputByRun: new Map(),
-  } as any;
-}
-
 describe("createWeavePlugin lifecycle", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -81,14 +69,15 @@ describe("createWeavePlugin lifecycle", () => {
     const { createWeavePlugin } = await import("./plugin.js");
     const plugin = createWeavePlugin({
       pluginConfig: { entity: "rgao", project: "p", apiKey: "k", serviceName: "svc-x" },
-      hookState: emptyHookState(),
+      hookState: createWeaveHookState(),
     });
-    await plugin.service.start({ logger: makeLogger() } as any);
+    await plugin.service.start({ logger: makeLogger(), config: {} } as any);
     const status = plugin.getStatus();
     expect(status.lifecycle).toBe("running");
-    expect(status.config?.projectId).toBe("rgao/p");
-    expect(status.config?.serviceName).toBe("svc-x");
-    expect(status.config?.authSource).toBe("literal");
+    assert(status.config);
+    expect(status.config.projectId).toBe("rgao/p");
+    expect(status.config.serviceName).toBe("svc-x");
+    expect(status.config.authSource).toBe("literal");
     expect(status.counts).toEqual({ turns: 0, calls: 0, tools: 0, subagents: 0 });
 
     await plugin.service.stop({ logger: makeLogger() } as any);
@@ -101,9 +90,9 @@ describe("createWeavePlugin lifecycle", () => {
     const disabledLog = makeLogger();
     const disabled = createWeavePlugin({
       pluginConfig: { enabled: false, entity: "e", project: "p" },
-      hookState: emptyHookState(),
+      hookState: createWeaveHookState(),
     });
-    await disabled.service.start({ logger: disabledLog } as any);
+    await disabled.service.start({ logger: disabledLog, config: {} } as any);
     expect(disabled.getStatus().lifecycle).toBe("disabled");
     expect(disabledLog.warn).toHaveBeenCalled();
 
@@ -114,9 +103,9 @@ describe("createWeavePlugin lifecycle", () => {
         project: "p",
         apiKey: { source: "file", id: "/tmp/weave-missing-key-" + Date.now(), provider: "x" },
       },
-      hookState: emptyHookState(),
+      hookState: createWeaveHookState(),
     });
-    await errored.service.start({ logger: errorLog } as any);
+    await errored.service.start({ logger: errorLog, config: {} } as any);
     expect(errored.getStatus().lifecycle).toBe("config-error");
     expect(errorLog.error).toHaveBeenCalled();
   });

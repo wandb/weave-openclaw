@@ -1,7 +1,7 @@
 {
   "name": "weave-openclaw",
   "version": "0.0.2",
-  "description": "OpenClaw third-party plugin: emit agent diagnostic events to W&B Weave's Agents OTel endpoint via the Weave Node SDK (gen_ai.* attribute namespace).",
+  "description": "OpenClaw plugin that traces agent sessions to W&B Weave for observability and debugging.",
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",

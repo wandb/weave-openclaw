@@ -19,7 +19,7 @@ import type { HookHandlers } from "./handlers/hook-types.js";
 const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
 const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
 
-export type CreateWeavePluginParams = {
+type CreateWeavePluginParams = {
   pluginConfig?: unknown;
   hookState: WeaveHookState;
 };
@@ -61,7 +61,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       lifecycleDetail = undefined;
       let cfg: ResolvedConfig;
       try {
-        cfg = await resolveConfig((params.pluginConfig ?? {}) as RawConfig);
+        cfg = await resolveConfig((params.pluginConfig ?? {}) as RawConfig, { config: ctx.config });
       } catch (err) {
         lifecycle = "config-error";
         lifecycleDetail = err instanceof Error ? err.message : String(err);
@@ -111,7 +111,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       try {
         await flushOTel();
       } catch (err) {
-        ctx?.logger?.warn?.(
+        ctx.logger.warn(
           `weave: flushOTel failed during stop: ${err instanceof Error ? err.message : String(err)}`,
         );
       }

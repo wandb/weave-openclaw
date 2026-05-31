@@ -9,8 +9,8 @@ import { createWeavePlugin, type WeavePlugin } from "./src/plugin.js";
 
 // register(api) can run multiple times (setup/runtime, hot-reload); cache the
 // instance + subscription on globalThis so a re-import doesn't make a stale duplicate.
-const PLUGIN_GLOBAL_KEY = Symbol.for("weave-openclaw.plugin.v1");
-const DIAGNOSTIC_SUBSCRIBED_KEY = Symbol.for("weave-openclaw.diagnosticSubscribed.v1");
+const PLUGIN_GLOBAL_KEY = Symbol.for("weave-openclaw.plugin");
+const DIAGNOSTIC_SUBSCRIBED_KEY = Symbol.for("weave-openclaw.diagnosticSubscribed");
 
 function getOrCreateSharedPlugin(pluginConfig: unknown): WeavePlugin {
   const g = globalThis as Record<PropertyKey, unknown>;
@@ -39,14 +39,8 @@ export default definePluginEntry({
   id: "weave",
   name: "W&B Weave",
   description:
-    "Emit OpenClaw agent diagnostic events to W&B Weave's Agents OTel endpoint via the weave.genai SDK.",
+    "Track OpenClaw agent sessions in W&B Weave for observability and debugging.",
   register(api) {
-    if (typeof api.on !== "function" || typeof api.registerService !== "function") {
-      // eslint-disable-next-line no-console
-      console.error("[weave] OpenClaw plugin SDK missing required surface; skipping.");
-      return;
-    }
-
     const plugin = getOrCreateSharedPlugin(api.pluginConfig);
 
     const hooks = plugin.handlers.hook;
