@@ -376,7 +376,7 @@ describe("tool lifecycle", () => {
     const { createWeaveHookState } = await import("./state/hook-state.js");
     const hookState = createWeaveHookState();
     const plugin = createWeavePlugin({
-      pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: false },
+      pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", captureContent: false },
       hookState,
     });
     await plugin.service.start({ logger: makeLogger() } as any);
