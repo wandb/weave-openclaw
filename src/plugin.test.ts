@@ -438,10 +438,11 @@ describe("side-channel attrs on Turn", () => {
     const turn = turnSpan();
     assert(turn);
     expect(turn.attributes["weave.cost.usd"]).toBeCloseTo(0.15);
-    expect(turn.attributes["weave.usage.input_tokens"]).toBe(100);
-    expect(turn.attributes["weave.usage.output_tokens"]).toBe(50);
-    expect(turn.attributes["weave.usage.cache_read.input_tokens"]).toBe(200);
-    expect(turn.attributes["weave.usage.cache_creation.input_tokens"]).toBe(30);
+    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(100);
+    expect(turn.attributes["gen_ai.usage.output_tokens"]).toBe(50);
+    expect(turn.attributes["gen_ai.usage.total_tokens"]).toBe(380);
+    expect(turn.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(200);
+    expect(turn.attributes["gen_ai.usage.cache_creation.input_tokens"]).toBe(30);
   });
 
   it("records tool.loop / run.attempt / message_received span events and context.assembled attrs", async () => {

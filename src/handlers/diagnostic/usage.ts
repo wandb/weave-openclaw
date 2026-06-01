@@ -23,14 +23,15 @@ export function createUsageDiagnosticHandlers(deps: HandlerDeps) {
         turn.setAttribute("weave.cost.usd", total);
       }
       // usage is typed required but the runtime sometimes emits cost-only; guard.
-      // Attribute names follow the Weave Agents semconv (weave.usage.*, no `.total`
-      // infix); there is no semconv total-tokens attribute, so total is dropped.
+      // Attribute names follow the OTel GenAI semconv as exposed by the Weave SDK
+      // (`gen_ai.usage.*`), matching what the chat span already emits.
       const usage = event.usage;
       if (usage) {
-        setIfInt(turn, "weave.usage.input_tokens", usage.input);
-        setIfInt(turn, "weave.usage.output_tokens", usage.output);
-        setIfInt(turn, "weave.usage.cache_read.input_tokens", usage.cacheRead);
-        setIfInt(turn, "weave.usage.cache_creation.input_tokens", usage.cacheWrite);
+        setIfInt(turn, "gen_ai.usage.input_tokens", usage.input);
+        setIfInt(turn, "gen_ai.usage.output_tokens", usage.output);
+        setIfInt(turn, "gen_ai.usage.total_tokens", usage.total);
+        setIfInt(turn, "gen_ai.usage.cache_read.input_tokens", usage.cacheRead);
+        setIfInt(turn, "gen_ai.usage.cache_creation.input_tokens", usage.cacheWrite);
       }
       const context = event.context;
       if (context) {
