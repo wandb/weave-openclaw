@@ -136,7 +136,7 @@ describe("turn lifecycle", () => {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -199,7 +199,7 @@ describe("turn lifecycle", () => {
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 1500,
         "weave.agent.success": true,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -209,7 +209,7 @@ describe("turn lifecycle", () => {
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 100,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -219,7 +219,7 @@ describe("turn lifecycle", () => {
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.success": false,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);

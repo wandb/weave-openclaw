@@ -39,7 +39,7 @@ describe("end-to-end smoke", () => {
       pluginConfig: { entity: "test-entity", project: "test-project", apiKey: "k", captureContent: true, agentName: "test-agent" },
       hookState,
     });
-    await plugin.service.start({ logger: makeLogger() } as any);
+    await plugin.service.start({ logger: makeLogger(), config: {} } as any);
 
     const hooks = plugin.handlers.hook;
     const emit = plugin.handlers.diagnostic!;
@@ -94,7 +94,7 @@ describe("end-to-end smoke", () => {
       pluginConfig: { entity: "test-entity", project: "test-project", apiKey: "k", captureContent: true, agentName: "test-agent" },
       hookState,
     });
-    await plugin.service.start({ logger: makeLogger() } as any);
+    await plugin.service.start({ logger: makeLogger(), config: {} } as any);
     const hooks = plugin.handlers.hook;
     const emit = plugin.handlers.diagnostic!;
 
