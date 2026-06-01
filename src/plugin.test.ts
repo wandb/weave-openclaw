@@ -125,8 +125,16 @@ describe("turn lifecycle", () => {
     await finish();
     expect(plugin.registries.turns.has("r-1")).toBe(false);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
-    expect(turn).toBeDefined();
-    expect(turn?.attributes["gen_ai.agent.name"]).toBeTruthy();
+    assert(turn);
+    expect(turn.attributes).toMatchInlineSnapshot(`
+      {
+        "gen_ai.agent.name": "openclaw-agent",
+        "gen_ai.conversation.id": "s",
+        "gen_ai.operation.name": "invoke_agent",
+        "weave.agent.version": "0.0.2",
+        "weave.outcome": "completed",
+      }
+    `);
   });
 
   it("maps outcome to span status: aborted stays OK, failed marks ERROR (weave.outcome stamped)", async () => {
@@ -164,9 +172,38 @@ describe("turn lifecycle", () => {
     dispatch.hook("agent_end", { runId: "r-false", success: false });
     completed(dispatch, "r-false");
     await finish();
-    const spans = exporter.getFinishedSpans();
-    expect(spans.find(s => s.attributes["weave.agent.duration_ms"] === 1500)?.attributes["weave.agent.success"]).toBe(true);
-    expect(spans.find(s => s.attributes["weave.agent.duration_ms"] === 100)?.attributes["weave.agent.success"]).toBeUndefined();
-    expect(spans.some(s => s.attributes["weave.agent.success"] === false)).toBe(true);
+    const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
+    expect(spans).toHaveLength(3);
+    expect(spans[0].attributes).toMatchInlineSnapshot(`
+      {
+        "gen_ai.agent.name": "openclaw-agent",
+        "gen_ai.conversation.id": "s",
+        "gen_ai.operation.name": "invoke_agent",
+        "weave.agent.duration_ms": 1500,
+        "weave.agent.success": true,
+        "weave.agent.version": "0.0.2",
+        "weave.outcome": "completed",
+      }
+    `);
+    expect(spans[1].attributes).toMatchInlineSnapshot(`
+      {
+        "gen_ai.agent.name": "openclaw-agent",
+        "gen_ai.conversation.id": "s",
+        "gen_ai.operation.name": "invoke_agent",
+        "weave.agent.duration_ms": 100,
+        "weave.agent.version": "0.0.2",
+        "weave.outcome": "completed",
+      }
+    `);
+    expect(spans[2].attributes).toMatchInlineSnapshot(`
+      {
+        "gen_ai.agent.name": "openclaw-agent",
+        "gen_ai.conversation.id": "s",
+        "gen_ai.operation.name": "invoke_agent",
+        "weave.agent.success": false,
+        "weave.agent.version": "0.0.2",
+        "weave.outcome": "completed",
+      }
+    `);
   });
 });
