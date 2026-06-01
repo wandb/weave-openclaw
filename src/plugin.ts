@@ -176,8 +176,8 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   const sessionHooks = createSessionHookHandlers(deps);
   const turnHooks = createTurnHookHandlers(deps);
   const llmHooks = createLlmHookHandlers(deps);
-  const runDiag = createRunDiagnosticHandlers(deps);
-  const chatDiag = createChatDiagnosticHandlers(deps);
+  const { onRunStarted, onRunFinalize, onRunAttempt } = createRunDiagnosticHandlers(deps);
+  const { onChatStart, onChatFinalize } = createChatDiagnosticHandlers(deps);
 
   const handlers: WeavePlugin["handlers"] = {
     hook: {
@@ -191,17 +191,17 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       if (!resolved) return;
       switch (event.type) {
         case "run.started":
-          return runDiag.onRunStarted(event);
+          return onRunStarted(event);
         case "run.completed":
-          return runDiag.onRunFinalize(event);
+          return onRunFinalize(event);
         case "run.attempt":
-          return runDiag.onRunAttempt(event);
+          return onRunAttempt(event);
         case "model.call.started":
-          return chatDiag.onChatStart(event);
+          return onChatStart(event);
         case "model.call.completed":
-          return chatDiag.onChatFinalize(event, "ok", undefined);
+          return onChatFinalize(event, "ok", undefined);
         case "model.call.error":
-          return chatDiag.onChatFinalize(event, "error", event.errorCategory);
+          return onChatFinalize(event, "error", event.errorCategory);
       }
     },
   };
