@@ -6,7 +6,6 @@ import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
 import { getOrCreateSession } from "../hooks/session.js";
-import { DEFAULT_AGENT_NAME } from "../constants.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
@@ -18,7 +17,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       const resolved = deps.getResolved();
       if (!resolved) return;
       if (deps.registries.turns.has(event.runId)) return;
-      const agentName = resolved.agentName ?? DEFAULT_AGENT_NAME;
+      const agentName = resolved.agentName;
       // Lazy-create, not redundant with session_start: a run can reach us for a
       // live sessionKey whose session_start we never saw (plugin started mid-session).
       const session = getOrCreateSession(deps, event.sessionKey, agentName);

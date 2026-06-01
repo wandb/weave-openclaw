@@ -5,7 +5,6 @@
 import { runIsolated, startSession, type Session } from "weave";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
-import { DEFAULT_AGENT_NAME } from "../constants.js";
 
 // Get-or-create the Session for this key, idempotent so its two callers (the
 // session_start hook and onRunStarted) can each be first. Returns undefined
@@ -33,7 +32,7 @@ export function createSessionHookHandlers(deps: HandlerDeps): {
     session_start(event: HookEvent<"session_start">): void {
       const resolved = deps.getResolved();
       if (!resolved) return;
-      getOrCreateSession(deps, event.sessionKey, resolved.agentName ?? DEFAULT_AGENT_NAME);
+      getOrCreateSession(deps, event.sessionKey, resolved.agentName);
     },
 
     session_end(event: HookEvent<"session_end">): void {
