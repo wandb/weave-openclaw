@@ -13,45 +13,17 @@ vi.mock("weave", async (importOriginal) => {
   return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
 });
 
-async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
-  const { createWeavePlugin } = await import("./plugin.js");
-  const hookState = createWeaveHookState();
-  const plugin = createWeavePlugin({
-    pluginConfig: { entity: "e", project: "p", apiKey: "k", ...extraConfig },
-    hookState,
-  });
-  await plugin.service.start({ logger: makeLogger(), config: {} } as any);
-  const dispatch = makeFakeApi(plugin);
-  return {
-    plugin,
-    hookState,
-    dispatch,
-    finish: () => plugin.service.stop({ logger: makeLogger() } as any),
-  };
-}
-
-function makeFakeApi(plugin: any) {
-  return {
-    hook(name: string, event: any, ctx?: any) {
-      const handler = plugin.handlers.hook[name];
-      if (handler) handler(event, ctx ?? {});
-    },
-    diagnostic(event: any) {
-      plugin.handlers.diagnostic(event, { trusted: true });
-    },
-  };
-}
-
 const exporter = new InMemorySpanExporter();
 
 beforeEach(async () => {
   exporter.reset();
-  process.env.WANDB_API_KEY = "test-key";
+  vi.stubEnv("WANDB_API_KEY", "test-key");
   await weaveInit("test/test", {
     genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
   });
-  // SDK provider is first-call-wins; pin the test exporter now, else the
-  // plugin's init() wins first and tests see zero spans.
+  // Provider is first-call-wins; pin an in-memory processor (the warmup turn
+  // forces it to build) before the plugin's init(), else init builds the real
+  // OTLP exporter and stop()'s flush egresses to W&B instead of staying local.
   startTurn({ agentName: "warmup" }).end();
   exporter.reset();
 });
