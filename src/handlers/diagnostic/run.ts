@@ -50,9 +50,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       deps.registries.turns.delete(event.runId);
       deps.costByRun.delete(event.runId);
       deps.pendingCompactionByRun.delete(event.runId);
-      // Guard against a newer same-session run having overwritten the entry.
-      if (event.sessionKey && deps.runIdBySession.get(event.sessionKey) === event.runId)
-        deps.runIdBySession.delete(event.sessionKey);
+      if (event.sessionKey) deps.runIdBySession.delete(event.sessionKey);
     },
 
     onRunAttempt(event: RunAttemptEvent): void {
