@@ -173,7 +173,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
 
   const sessionHooks = createSessionHookHandlers(deps);
   const turnHooks = createTurnHookHandlers(deps);
-  const runDiag = createRunDiagnosticHandlers(deps);
+  const { onRunStarted, onRunFinalize, onRunAttempt } = createRunDiagnosticHandlers(deps);
 
   const handlers: WeavePlugin["handlers"] = {
     hook: {
@@ -186,11 +186,11 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       if (!resolved) return;
       switch (event.type) {
         case "run.started":
-          return runDiag.onRunStarted(event);
+          return onRunStarted(event);
         case "run.completed":
-          return runDiag.onRunFinalize(event);
+          return onRunFinalize(event);
         case "run.attempt":
-          return runDiag.onRunAttempt(event);
+          return onRunAttempt(event);
       }
     },
   };
