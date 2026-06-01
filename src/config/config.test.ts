@@ -11,7 +11,7 @@ import { resolveConfig } from "./config.js";
 // strings and env SecretRefs (provider "default") resolve; file/exec need a configured provider.
 // These tests cover the plugin's contract, not OpenClaw's env/file/exec internals (OpenClaw's own).
 const ctx = (env: NodeJS.ProcessEnv = {}) => ({ config: {} as OpenClawConfig, env });
-const base = { entity: "e", project: "p" };
+const base = { entity: "my-team", project: "my-project" };
 
 describe("resolveConfig", () => {
   it("resolves apiKey + authSource (literal, env SecretRef; undefined when unset)", async () => {
@@ -48,16 +48,16 @@ describe("resolveConfig", () => {
   });
 
   it("requires entity and project; builds projectId as entity/project", async () => {
-    await expect(resolveConfig({ entity: "", project: "p" }, ctx())).rejects.toThrow(/entity/);
-    await expect(resolveConfig({ entity: "  ", project: "p" }, ctx())).rejects.toThrow(/entity/);
-    await expect(resolveConfig({ entity: "e", project: "" }, ctx())).rejects.toThrow(/project/);
-    await expect(resolveConfig({ entity: "e", project: "  " }, ctx())).rejects.toThrow(/project/);
+    await expect(resolveConfig({ entity: "", project: "my-project" }, ctx())).rejects.toThrow(/entity/);
+    await expect(resolveConfig({ entity: "  ", project: "my-project" }, ctx())).rejects.toThrow(/entity/);
+    await expect(resolveConfig({ entity: "my-team", project: "" }, ctx())).rejects.toThrow(/project/);
+    await expect(resolveConfig({ entity: "my-team", project: "  " }, ctx())).rejects.toThrow(/project/);
     // @ts-expect-error entity and project are required by the type, not just at runtime
     await expect(resolveConfig({}, ctx())).rejects.toThrow(/entity|project/);
 
-    const cfg = await resolveConfig({ entity: "ent", project: "proj" }, ctx());
-    expect(cfg.entity).toBe("ent");
-    expect(cfg.projectId).toBe("ent/proj");
+    const cfg = await resolveConfig({ entity: "acme", project: "agent-traces" }, ctx());
+    expect(cfg.entity).toBe("acme");
+    expect(cfg.projectId).toBe("acme/agent-traces");
   });
 
   it("applies field defaults (captureContent, agentVersion, flush clamp)", async () => {
