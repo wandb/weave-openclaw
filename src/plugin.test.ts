@@ -323,28 +323,10 @@ describe("closeRunChatSpans positional attribution", () => {
 });
 
 describe("tool lifecycle", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin({ captureContent: true });
-    ctx.dispatch.diagnostic({
-      type: "run.started",
-      ts: 1000,
-      runId: "r",
-      sessionKey: "s",
-      trace: { traceId: "t", spanId: "sp" },
-    });
+  async function setupTurn(captureContent = true) {
+    const ctx = await bootPlugin({ captureContent });
+    started(ctx.dispatch);
     return ctx;
-  }
-
-  async function endRun(dispatch: any, finish: () => Promise<void>) {
-    dispatch.diagnostic({
-      type: "run.completed",
-      ts: 9000,
-      runId: "r",
-      sessionKey: "s",
-      trace: { traceId: "t", spanId: "sp" },
-      outcome: "completed",
-    });
-    await finish();
   }
 
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
@@ -360,7 +342,8 @@ describe("tool lifecycle", () => {
     // blocked
     dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-3", toolName: "search", trace: { traceId: "t", spanId: "tc3", parentSpanId: "sp" } });
     dispatch.diagnostic({ type: "tool.execution.blocked", ts: 1300, runId: "r", toolCallId: "tc-3", trace: { traceId: "t", spanId: "tc3" } });
-    await endRun(dispatch, finish);
+    completed(dispatch);
+    await finish();
     const byId = (id: string) => exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === id);
     const ok = byId("tc-1");
     const errored = byId("tc-2");
@@ -378,53 +361,13 @@ describe("tool lifecycle", () => {
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
-    const { createWeavePlugin } = await import("./plugin.js");
-    const { createWeaveHookState } = await import("./state/hook-state.js");
-    const hookState = createWeaveHookState();
-    const plugin = createWeavePlugin({
-      pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", captureContent: false },
-      hookState,
-    });
-    await plugin.service.start({ logger: makeLogger(), config: {} } as any);
-    const dispatch = makeFakeApi(plugin);
-    dispatch.diagnostic({
-      type: "run.started",
-      ts: 1,
-      runId: "r-nc",
-      sessionKey: "s-nc",
-      trace: { traceId: "tnc", spanId: "spnc" },
-    });
-    dispatch.hook("before_tool_call", {
-      runId: "r-nc",
-      toolCallId: "tc-nc",
-      toolName: "search",
-      params: { q: "secret" },
-    });
-    dispatch.diagnostic({
-      type: "tool.execution.started",
-      ts: 2,
-      runId: "r-nc",
-      toolCallId: "tc-nc",
-      toolName: "search",
-      trace: { traceId: "tnc", spanId: "tcspnc", parentSpanId: "spnc" },
-    });
-    dispatch.hook("after_tool_call", { runId: "r-nc", toolCallId: "tc-nc", result: { secret: "shhh" } });
-    dispatch.diagnostic({
-      type: "tool.execution.completed",
-      ts: 3,
-      runId: "r-nc",
-      toolCallId: "tc-nc",
-      trace: { traceId: "tnc", spanId: "tcspnc" },
-    });
-    dispatch.diagnostic({
-      type: "run.completed",
-      ts: 4,
-      runId: "r-nc",
-      sessionKey: "s-nc",
-      trace: { traceId: "tnc", spanId: "spnc" },
-      outcome: "completed",
-    });
-    await plugin.service.stop({ logger: makeLogger() } as any);
+    const { dispatch, finish } = await setupTurn(false);
+    dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
+    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
+    dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
+    dispatch.diagnostic({ type: "tool.execution.completed", ts: 1300, runId: "r", toolCallId: "tc-nc", trace: { traceId: "t", spanId: "tcnc" } });
+    completed(dispatch);
+    await finish();
     const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-nc");
     assert(span); // the execute_tool span is still emitted; only its content is withheld
     expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
@@ -444,7 +387,8 @@ describe("tool lifecycle", () => {
       count: 3,
       message: "repeated tool call",
     });
-    await endRun(dispatch, finish);
+    completed(dispatch);
+    await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
     const loop = turn.events.find(e => e.name === "tool.loop");
