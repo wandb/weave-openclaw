@@ -10,6 +10,8 @@ import { PACKAGE_VERSION } from "./version.js";
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 const MIN_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
+// Fallback agent name for Sessions and Turns when config sets no agentName.
+const DEFAULT_AGENT_NAME = "openclaw-agent";
 const API_KEY_CONFIG_PATH = "plugins.entries.weave.config.apiKey";
 
 // Raw plugin settings from openclaw.plugin.json. `entity` and `project` are required (resolveConfig
@@ -34,7 +36,7 @@ export type ResolvedConfig = {
   project: string;
   projectId: string;
   serviceName: string;
-  agentName?: string;
+  agentName: string;
   agentVersion: string;
   agentDescription?: string;
   captureContent: boolean;
@@ -69,7 +71,7 @@ export async function resolveConfig(raw: RawConfig, ctx: ResolveContext): Promis
     project,
     projectId: `${entity}/${project}`,
     serviceName: raw.serviceName || DEFAULT_SERVICE_NAME,
-    agentName: raw.agentName,
+    agentName: raw.agentName || DEFAULT_AGENT_NAME,
     agentVersion: raw.agentVersion || PACKAGE_VERSION,
     agentDescription: raw.agentDescription,
     captureContent: raw.captureContent !== false,
