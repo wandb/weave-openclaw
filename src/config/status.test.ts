@@ -14,7 +14,7 @@ describe("formatStatus", () => {
       config: {
         projectId: "my-team/openclaw-default",
         serviceName: "openclaw-agent",
-        agentVersion: "0.0.1+20260523150411",
+        agentVersion: "0.0.1",
         flushIntervalMs: 5000,
         captureContent: true,
         authSource: "env:WANDB_API_KEY",
@@ -25,7 +25,7 @@ describe("formatStatus", () => {
     expect(out).toMatchInlineSnapshot(`
       "weave: pluginVersion=0.0.1
              lifecycle=running started=2024-05-23T16:04:11.000Z
-             project=my-team/openclaw-default service=openclaw-agent agentVersion=0.0.1+20260523150411
+             project=my-team/openclaw-default service=openclaw-agent agentVersion=0.0.1
              auth=env:WANDB_API_KEY flushIntervalMs=5000 captureContent=on
              active: turns=3 calls=1 tools=0 subagents=0
              dashboard https://wandb.ai/my-team/openclaw-default/weave"
