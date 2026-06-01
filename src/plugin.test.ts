@@ -36,18 +36,27 @@ function makeLogger() {
 async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
   const { createWeavePlugin } = await import("./plugin.js");
   const hookState = createWeaveHookState();
+  const logger = makeLogger();
   const plugin = createWeavePlugin({
     pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent", ...extraConfig },
     hookState,
   });
-  await plugin.service.start({ logger: makeLogger(), config: {} } as any);
+  await plugin.service.start({ logger, config: {} } as any);
   return {
     plugin,
     hookState,
+    logger,
     dispatch: makeFakeApi(plugin),
-    finish: () => plugin.service.stop({ logger: makeLogger() } as any),
+    finish: () => plugin.service.stop({ logger } as any),
   };
 }
+
+// Shared run-lifecycle dispatch for the diagnostic suites below.
+const trace = { traceId: "t", spanId: "sp" };
+const started = (d: any, runId = "r", sessionKey = "s") =>
+  d.diagnostic({ type: "run.started", ts: 1000, runId, sessionKey, trace });
+const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
+  d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
 
 function makeFakeApi(plugin: any) {
   return {
@@ -113,12 +122,6 @@ describe("createWeavePlugin lifecycle", () => {
 });
 
 describe("turn lifecycle", () => {
-  const trace = { traceId: "t", spanId: "sp" };
-  const started = (d: any, runId: string, sessionKey = "s") =>
-    d.diagnostic({ type: "run.started", ts: 1000, runId, sessionKey, trace });
-  const completed = (d: any, runId: string, outcome = "completed", sessionKey = "s") =>
-    d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
-
   it("opens the invoke_agent Turn on run.started and ends it (with a default agent name) on run.completed", async () => {
     const { plugin, dispatch, finish } = await bootPlugin(); // no explicit agentName
     started(dispatch, "r-1");
@@ -226,18 +229,9 @@ describe("turn lifecycle", () => {
 describe("llm two-signal close", () => {
   async function setupTurn() {
     const ctx = await bootPlugin();
-    ctx.dispatch.diagnostic({
-      type: "run.started",
-      ts: 1000,
-      runId: "r",
-      sessionKey: "s",
-      trace: { traceId: "t", spanId: "sp" },
-    });
+    started(ctx.dispatch);
     return ctx;
   }
-
-  const endRun = (d: any) =>
-    d.diagnostic({ type: "run.completed", ts: 9000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" });
 
   it("buffers llm_input before model_call_started, promotes it, and closes the chat span with model + usage", async () => {
     const { dispatch, hookState, finish } = await setupTurn();
@@ -249,7 +243,7 @@ describe("llm two-signal close", () => {
     dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
     dispatch.hook("llm_output", { runId: "r", assistantTexts: ["hello"], usage: { input: 5, output: 3 } });
     dispatch.diagnostic({ type: "model.call.completed", ts: 1500, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "sp2" } });
-    endRun(dispatch);
+    completed(dispatch);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
@@ -276,7 +270,7 @@ describe("llm two-signal close", () => {
     dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
     dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
     dispatch.diagnostic({ type: "model.call.error", ts: 1200, runId: "r", callId: "c-1", errorCategory: "ProviderTimeout", trace: { traceId: "t", spanId: "sp2" } });
-    endRun(dispatch);
+    completed(dispatch);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
     assert(chat);
@@ -287,14 +281,14 @@ describe("llm two-signal close", () => {
 describe("closeRunChatSpans positional attribution", () => {
   async function twoCallRun(texts: string[]) {
     const { dispatch, finish } = await bootPlugin();
-    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" } });
+    started(dispatch);
     for (const callId of ["c-1", "c-2"]) {
       dispatch.hook("model_call_started", { runId: "r", callId });
       dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId, model: "gpt-4o", trace: { traceId: "t", spanId: callId, parentSpanId: "sp" } });
       dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId, trace: { traceId: "t", spanId: callId } });
     }
     dispatch.hook("llm_output", { runId: "r", assistantTexts: texts });
-    dispatch.diagnostic({ type: "run.completed", ts: 1500, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" });
+    completed(dispatch);
     await finish();
     return exporter.getFinishedSpans().filter(s => s.name === "chat").map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
   }
@@ -315,24 +309,15 @@ describe("closeRunChatSpans positional attribution", () => {
   });
 
   it("warns when llm_output text count drifts from the tracked chat-span count", async () => {
-    const log = makeLogger();
-    const { createWeavePlugin } = await import("./plugin.js");
-    const { createWeaveHookState } = await import("./state/hook-state.js");
-    const plugin = createWeavePlugin({
-      pluginConfig: { entity: "e", project: "p", apiKey: "k", captureContent: true },
-      hookState: createWeaveHookState(),
-    });
-    await plugin.service.start({ logger: log, config: {} } as any);
-    const d = plugin.handlers.diagnostic!;
-    const h = plugin.handlers.hook;
-    d({ type: "run.started", ts: 1000, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" } }, { trusted: true });
-    h.model_call_started!({ runId: "r", callId: "c-1" });
-    d({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } }, { trusted: true });
-    d({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "cs1" } }, { trusted: true });
-    h.llm_output!({ runId: "r", assistantTexts: ["a", "b"] }); // 2 texts, 1 tracked span
-    d({ type: "run.completed", ts: 1300, runId: "r", sessionKey: "s", trace: { traceId: "t", spanId: "sp" }, outcome: "completed" }, { trusted: true });
-    await plugin.service.stop({ logger: log } as any);
-    const warned = (log.warn as any).mock.calls.map((c: any[]) => String(c[0])).some((m: string) => m.includes("did not match tracked chat-span count"));
+    const { dispatch, finish, logger } = await bootPlugin();
+    started(dispatch);
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "cs1" } });
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["a", "b"] }); // 2 texts, 1 tracked span
+    completed(dispatch);
+    await finish();
+    const warned = (logger.warn as any).mock.calls.map((c: any[]) => String(c[0])).some((m: string) => m.includes("did not match tracked chat-span count"));
     expect(warned).toBe(true);
   });
 });
