@@ -51,6 +51,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let startedAt: number | undefined;
   const costByRun = new BoundedMap<string, number>();
   const pendingCompactionByRun = new BoundedMap<string, { itemsBefore: number }>();
+  const runIdBySession = new BoundedMap<string, string>();
   let logger: HandlerLogger | undefined;
 
   const deps: HandlerDeps = {
@@ -60,6 +61,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     getLogger: () => logger,
     costByRun,
     pendingCompactionByRun,
+    runIdBySession,
   };
 
   function resetTransientState(): void {
@@ -72,6 +74,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     params.hookState.assistantOutputByRun.clear();
     costByRun.clear();
     pendingCompactionByRun.clear();
+    runIdBySession.clear();
   }
 
   const service: OpenClawPluginService = {

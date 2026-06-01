@@ -32,6 +32,8 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       if (resolved.agentDescription)
         turn.setAttribute("gen_ai.agent.description", resolved.agentDescription);
       deps.registries.turns.set(event.runId, turn);
+      // Index by sessionKey so tool.loop events (which omit runId) reach this Turn.
+      if (event.sessionKey) deps.runIdBySession.set(event.sessionKey, event.runId);
     },
 
     // Only the "error" outcome marks the Turn ERROR; completed and aborted stay OK.
@@ -48,6 +50,9 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       deps.registries.turns.delete(event.runId);
       deps.costByRun.delete(event.runId);
       deps.pendingCompactionByRun.delete(event.runId);
+      // Guard against a newer same-session run having overwritten the entry.
+      if (event.sessionKey && deps.runIdBySession.get(event.sessionKey) === event.runId)
+        deps.runIdBySession.delete(event.sessionKey);
     },
 
     onRunAttempt(event: RunAttemptEvent): void {

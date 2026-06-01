@@ -363,12 +363,18 @@ describe("tool lifecycle", () => {
     await endRun(dispatch, finish);
     const byId = (id: string) => exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === id);
     const ok = byId("tc-1");
-    expect(ok?.name).toBe("execute_tool");
-    expect(ok?.attributes["gen_ai.tool.name"]).toBe("search");
-    expect(ok?.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
-    expect(ok?.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
-    expect(byId("tc-2")?.status.code).toBe(2);
-    expect(byId("tc-3")?.status.code).toBe(2);
+    const errored = byId("tc-2");
+    const blocked = byId("tc-3");
+    assert(ok);
+    assert(errored);
+    assert(blocked);
+    expect(ok.name).toBe("execute_tool");
+    expect(ok.attributes["gen_ai.tool.name"]).toBe("search");
+    expect(ok.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
+    expect(ok.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
+    expect(ok.status.code).not.toBe(2); // completed tool is not an error
+    expect(errored.status.code).toBe(2);
+    expect(blocked.status.code).toBe(2);
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
@@ -423,5 +429,32 @@ describe("tool lifecycle", () => {
     assert(span); // the execute_tool span is still emitted; only its content is withheld
     expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
     expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+  });
+
+  it("records a tool.loop event on the Turn (resolved via sessionKey, which the event carries instead of runId)", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.loop",
+      ts: 1200,
+      sessionKey: "s", // tool.loop omits runId; sessionKey maps back to the run's Turn
+      toolName: "search",
+      level: "warning",
+      action: "warn",
+      detector: "generic_repeat",
+      count: 3,
+      message: "repeated tool call",
+    });
+    await endRun(dispatch, finish);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
+    const loop = turn.events.find(e => e.name === "tool.loop");
+    assert(loop);
+    assert(loop.attributes);
+    expect(loop.attributes["gen_ai.tool.name"]).toBe("search");
+    expect(loop.attributes["weave.loop.level"]).toBe("warning");
+    expect(loop.attributes["weave.loop.action"]).toBe("warn");
+    expect(loop.attributes["weave.loop.detector"]).toBe("generic_repeat");
+    expect(loop.attributes["weave.loop.count"]).toBe(3);
+    expect(loop.attributes["weave.loop.message"]).toBe("repeated tool call");
   });
 });

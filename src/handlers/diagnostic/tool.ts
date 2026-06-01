@@ -8,17 +8,12 @@ import { lookupToolCall } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";
 import { safeJson } from "../util.js";
 
-// `toolInput`/`toolOutput`/`runId` are emitted at runtime on these events but the
-// published DiagnosticEventPayload doesn't declare them yet (upstream type gap);
-// declared here as optional extensions so we read them typed instead of casting.
-type ToolStartEvent = Extract<DiagnosticEventPayload, { type: "tool.execution.started" }> & {
-  toolInput?: unknown;
-};
+type ToolStartEvent = Extract<DiagnosticEventPayload, { type: "tool.execution.started" }>;
 type ToolFinalizeEvent = Extract<
   DiagnosticEventPayload,
   { type: "tool.execution.completed" | "tool.execution.error" | "tool.execution.blocked" }
-> & { toolOutput?: unknown };
-type ToolLoopEvent = Extract<DiagnosticEventPayload, { type: "tool.loop" }> & { runId?: string };
+>;
+type ToolLoopEvent = Extract<DiagnosticEventPayload, { type: "tool.loop" }>;
 
 export function createToolDiagnosticHandlers(deps: HandlerDeps) {
   return {
@@ -29,9 +24,8 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       const captured = lookupToolCall(deps.hookState, event.toolCallId).args;
-      // toolInput is richer than paramsSummary when present.
       const args = resolved.captureContent
-        ? safeJson(captured?.params ?? event.toolInput ?? event.paramsSummary)
+        ? safeJson(captured?.params ?? event.paramsSummary)
         : undefined;
       const tool = runIsolated(() =>
         turn.startTool({
@@ -54,7 +48,7 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
       const resolved = deps.getResolved();
       if (resolved?.captureContent) {
         const captured = lookupToolCall(deps.hookState, event.toolCallId).result;
-        const result = safeJson(captured?.result ?? event.toolOutput);
+        const result = safeJson(captured?.result);
         if (result !== undefined) tool.result = result;
       }
       tool.end(
@@ -68,7 +62,8 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
     },
 
     onToolLoop(event: ToolLoopEvent): void {
-      const runId = event.runId;
+      // tool.loop carries sessionKey, not runId; map back to the run's open Turn.
+      const runId = event.sessionKey && deps.runIdBySession.get(event.sessionKey);
       if (!runId) return;
       const turn = deps.registries.turns.get(runId);
       if (!turn) return;
