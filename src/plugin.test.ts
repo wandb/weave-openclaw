@@ -379,7 +379,7 @@ describe("tool lifecycle", () => {
       pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", captureContent: false },
       hookState,
     });
-    await plugin.service.start({ logger: makeLogger() } as any);
+    await plugin.service.start({ logger: makeLogger(), config: {} } as any);
     const dispatch = makeFakeApi(plugin);
     dispatch.diagnostic({
       type: "run.started",
@@ -420,7 +420,8 @@ describe("tool lifecycle", () => {
     });
     await plugin.service.stop({ logger: makeLogger() } as any);
     const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-nc");
-    expect(span?.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
-    expect(span?.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+    assert(span); // the execute_tool span is still emitted; only its content is withheld
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
   });
 });
