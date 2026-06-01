@@ -6,6 +6,7 @@ import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
 import { getOrCreateSession } from "../hooks/session.js";
+import { closeRunChatSpans } from "../llm-state.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
@@ -35,6 +36,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
 
     // Only the "error" outcome marks the Turn ERROR; completed and aborted stay OK.
     onRunFinalize(event: RunCompletedEvent): void {
+      closeRunChatSpans(deps, event.runId);
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       turn.setAttribute("weave.outcome", event.outcome);
