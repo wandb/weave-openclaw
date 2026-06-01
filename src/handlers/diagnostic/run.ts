@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { runIsolated, startSession, startTurn } from "weave";
+import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
+import { getOrCreateSession } from "../hooks/session.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
@@ -18,25 +19,8 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       const resolved = deps.getResolved();
       if (!resolved) return;
       if (deps.registries.turns.has(event.runId)) return;
-      const sessionKey = event.sessionKey;
-      const existingSession = sessionKey
-        ? deps.registries.sessions.get(sessionKey)
-        : undefined;
       const agentName = resolved.agentName ?? DEFAULT_AGENT_NAME;
-      const session =
-        existingSession ??
-        (sessionKey
-          ? (() => {
-              const s = runIsolated(() =>
-                startSession({
-                  sessionId: sessionKey,
-                  agentName,
-                }),
-              );
-              deps.registries.sessions.set(sessionKey, s);
-              return s;
-            })()
-          : undefined);
+      const session = getOrCreateSession(deps, event.sessionKey, agentName);
       const turn = runIsolated(() =>
         session
           ? session.startTurn({ agentName, model: event.model })
