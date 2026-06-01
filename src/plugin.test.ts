@@ -137,18 +137,18 @@ describe("turn lifecycle", () => {
     `);
   });
 
-  it("maps outcome to span status: aborted stays OK, failed marks ERROR (weave.outcome stamped)", async () => {
+  it("maps outcome to span status: aborted stays OK, error marks ERROR (weave.outcome stamped)", async () => {
     const { dispatch, finish } = await bootPlugin();
     started(dispatch, "r-ok", "s-ok");
     completed(dispatch, "r-ok", "aborted", "s-ok");
     started(dispatch, "r-bad", "s-bad");
-    completed(dispatch, "r-bad", "failed", "s-bad");
+    completed(dispatch, "r-bad", "error", "s-bad");
     await finish();
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     const aborted = spans.find(s => s.attributes["weave.outcome"] === "aborted");
-    const failed = spans.find(s => s.attributes["weave.outcome"] === "failed");
+    const errored = spans.find(s => s.attributes["weave.outcome"] === "error");
     expect(aborted?.status.code).not.toBe(2); // user-cancel must not count as error
-    expect(failed?.status.code).toBe(2);
+    expect(errored?.status.code).toBe(2);
   });
 
   it("opens and closes a Session on session_start / session_end", async () => {

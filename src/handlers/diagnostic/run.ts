@@ -34,7 +34,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       deps.registries.turns.set(event.runId, turn);
     },
 
-    // aborted stays OK; other non-completed outcomes mark the Turn ERROR.
+    // Only the "error" outcome marks the Turn ERROR; completed and aborted stay OK.
     onRunFinalize(event: RunCompletedEvent): void {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
@@ -60,6 +60,6 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
   };
 }
 
-function isErrorOutcome(outcome: string): boolean {
-  return outcome !== "completed" && outcome !== "aborted";
+function isErrorOutcome(outcome: RunCompletedEvent["outcome"]): boolean {
+  return outcome === "error";
 }
