@@ -62,6 +62,10 @@ export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
   }
 }
 
+function isMessage(value: unknown): value is Message {
+  return typeof value === "object" && value !== null && "role" in value && "content" in value;
+}
+
 function shapeMessages(
   capture: {
     input?: { systemPrompt?: string; prompt: string; historyMessages?: unknown[] };
@@ -76,9 +80,7 @@ function shapeMessages(
     }
     if (Array.isArray(capture.input.historyMessages)) {
       for (const m of capture.input.historyMessages) {
-        if (m && typeof m === "object" && "role" in m && "content" in m) {
-          out.input.push(m as Message);
-        }
+        if (isMessage(m)) out.input.push(m);
       }
     }
     if (capture.input.prompt) {

@@ -24,6 +24,7 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
           providerName: event.provider,
         }),
       );
+      // Default ok; a call with no model.call.completed/error before run.completed closes ok.
       deps.registries.calls.set(event.callId, { llm, status: "ok" });
       const list = deps.hookState.chatCallsByRun.get(event.runId);
       if (list) {
