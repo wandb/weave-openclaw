@@ -321,3 +321,84 @@ describe("closeRunChatSpans positional attribution", () => {
     expect(warned).toBe(true);
   });
 });
+
+describe("tool lifecycle", () => {
+  async function setupTurn(captureContent = true) {
+    const ctx = await bootPlugin({ captureContent });
+    started(ctx.dispatch);
+    return ctx;
+  }
+
+  it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
+    const { dispatch, finish } = await setupTurn();
+    // completed, with captured args + result
+    dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-1", toolName: "search", params: { q: "weave" } });
+    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-1", toolName: "search", trace: { traceId: "t", spanId: "tc1", parentSpanId: "sp" } });
+    dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-1", result: { hits: 7 } });
+    dispatch.diagnostic({ type: "tool.execution.completed", ts: 1300, runId: "r", toolCallId: "tc-1", trace: { traceId: "t", spanId: "tc1" } });
+    // errored
+    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-2", toolName: "search", trace: { traceId: "t", spanId: "tc2", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "tool.execution.error", ts: 1300, runId: "r", toolCallId: "tc-2", errorCategory: "Timeout", trace: { traceId: "t", spanId: "tc2" } });
+    // blocked
+    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-3", toolName: "search", trace: { traceId: "t", spanId: "tc3", parentSpanId: "sp" } });
+    dispatch.diagnostic({ type: "tool.execution.blocked", ts: 1300, runId: "r", toolCallId: "tc-3", trace: { traceId: "t", spanId: "tc3" } });
+    completed(dispatch);
+    await finish();
+    const byId = (id: string) => exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === id);
+    const ok = byId("tc-1");
+    const errored = byId("tc-2");
+    const blocked = byId("tc-3");
+    assert(ok);
+    assert(errored);
+    assert(blocked);
+    expect(ok.name).toBe("execute_tool");
+    expect(ok.attributes["gen_ai.tool.name"]).toBe("search");
+    expect(ok.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
+    expect(ok.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
+    expect(ok.status.code).not.toBe(2); // completed tool is not an error
+    expect(errored.status.code).toBe(2);
+    expect(blocked.status.code).toBe(2);
+  });
+
+  it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
+    const { dispatch, finish } = await setupTurn(false);
+    dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
+    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
+    dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
+    dispatch.diagnostic({ type: "tool.execution.completed", ts: 1300, runId: "r", toolCallId: "tc-nc", trace: { traceId: "t", spanId: "tcnc" } });
+    completed(dispatch);
+    await finish();
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-nc");
+    assert(span); // the execute_tool span is still emitted; only its content is withheld
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
+    expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
+  });
+
+  it("records a tool.loop event on the Turn (resolved via sessionKey, which the event carries instead of runId)", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.loop",
+      ts: 1200,
+      sessionKey: "s", // tool.loop omits runId; sessionKey maps back to the run's Turn
+      toolName: "search",
+      level: "warning",
+      action: "warn",
+      detector: "generic_repeat",
+      count: 3,
+      message: "repeated tool call",
+    });
+    completed(dispatch);
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
+    const loop = turn.events.find(e => e.name === "tool.loop");
+    assert(loop);
+    assert(loop.attributes);
+    expect(loop.attributes["gen_ai.tool.name"]).toBe("search");
+    expect(loop.attributes["weave.loop.level"]).toBe("warning");
+    expect(loop.attributes["weave.loop.action"]).toBe("warn");
+    expect(loop.attributes["weave.loop.detector"]).toBe("generic_repeat");
+    expect(loop.attributes["weave.loop.count"]).toBe(3);
+    expect(loop.attributes["weave.loop.message"]).toBe("repeated tool call");
+  });
+});

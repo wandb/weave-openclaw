@@ -19,9 +19,11 @@ import type { HookHandlers } from "./handlers/hook-types.js";
 import { BoundedMap } from "./util/bounded-map.js";
 import { createSessionHookHandlers } from "./handlers/hooks/session.js";
 import { createTurnHookHandlers } from "./handlers/hooks/turn.js";
+import { createToolHookHandlers } from "./handlers/hooks/tool.js";
 import { createLlmHookHandlers } from "./handlers/hooks/llm.js";
 import { createRunDiagnosticHandlers } from "./handlers/diagnostic/run.js";
 import { createChatDiagnosticHandlers } from "./handlers/diagnostic/chat.js";
+import { createToolDiagnosticHandlers } from "./handlers/diagnostic/tool.js";
 
 const WANDB_CLOUD_API_BASE_URL = "https://api.wandb.ai";
 const WANDB_CLOUD_UI_BASE_URL = "https://wandb.ai";
@@ -49,6 +51,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   let startedAt: number | undefined;
   const costByRun = new BoundedMap<string, number>();
   const pendingCompactionByRun = new BoundedMap<string, { itemsBefore: number }>();
+  const runIdBySession = new BoundedMap<string, string>();
   let logger: HandlerLogger | undefined;
 
   const deps: HandlerDeps = {
@@ -58,6 +61,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     getLogger: () => logger,
     costByRun,
     pendingCompactionByRun,
+    runIdBySession,
   };
 
   function resetTransientState(): void {
@@ -70,6 +74,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     params.hookState.assistantOutputByRun.clear();
     costByRun.clear();
     pendingCompactionByRun.clear();
+    runIdBySession.clear();
   }
 
   const service: OpenClawPluginService = {
@@ -175,14 +180,17 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
 
   const sessionHooks = createSessionHookHandlers(deps);
   const turnHooks = createTurnHookHandlers(deps);
+  const toolHooks = createToolHookHandlers(deps);
   const llmHooks = createLlmHookHandlers(deps);
   const { onRunStarted, onRunFinalize, onRunAttempt } = createRunDiagnosticHandlers(deps);
   const { onChatStart, onChatFinalize } = createChatDiagnosticHandlers(deps);
+  const { onToolStart, onToolFinalize, onToolLoop } = createToolDiagnosticHandlers(deps);
 
   const handlers: WeavePlugin["handlers"] = {
     hook: {
       ...sessionHooks,
       ...turnHooks,
+      ...toolHooks,
       ...llmHooks,
     },
     diagnostic(event, meta) {
@@ -202,6 +210,16 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
           return onChatFinalize(event, "ok", undefined);
         case "model.call.error":
           return onChatFinalize(event, "error", event.errorCategory);
+        case "tool.execution.started":
+          return onToolStart(event);
+        case "tool.execution.completed":
+          return onToolFinalize(event, "ok", undefined);
+        case "tool.execution.error":
+          return onToolFinalize(event, "error", event.errorCategory);
+        case "tool.execution.blocked":
+          return onToolFinalize(event, "error", "blocked");
+        case "tool.loop":
+          return onToolLoop(event);
       }
     },
   };
