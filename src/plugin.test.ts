@@ -149,8 +149,10 @@ describe("turn lifecycle", () => {
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     const aborted = spans.find(s => s.attributes["weave.outcome"] === "aborted");
     const errored = spans.find(s => s.attributes["weave.outcome"] === "error");
-    expect(aborted?.status.code).not.toBe(2); // user-cancel must not count as error
-    expect(errored?.status.code).toBe(2);
+    assert(aborted);
+    assert(errored);
+    expect(aborted.status.code).not.toBe(2); // user-cancel must not count as error
+    expect(errored.status.code).toBe(2);
   });
 
   it("opens a Session on session_start, wraps the run's Turn, and closes on session_end", async () => {
@@ -250,9 +252,23 @@ describe("llm two-signal close", () => {
     endRun(dispatch);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
-    expect(chat?.attributes["gen_ai.request.model"]).toBe("gpt-4o");
-    expect(chat?.attributes["gen_ai.usage.input_tokens"]).toBe(5);
-    expect(chat?.attributes["gen_ai.usage.output_tokens"]).toBe(3);
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(chat);
+    assert(turn);
+    // chat span nests under the invoke_agent Turn
+    expect(chat.parentSpanId).toBe(turn.spanContext().spanId);
+    // full emitted payload: model, conversation, captured input/output messages, usage
+    expect(chat.attributes).toMatchInlineSnapshot(`
+      {
+        "gen_ai.conversation.id": "s",
+        "gen_ai.input.messages": "[{"role":"system","content":"be helpful"},{"role":"user","content":"hi"}]",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.output.messages": "[{"role":"assistant","content":"hello"}]",
+        "gen_ai.request.model": "gpt-4o",
+        "gen_ai.usage.input_tokens": 5,
+        "gen_ai.usage.output_tokens": 3,
+      }
+    `);
   });
 
   it("marks the chat span ERROR on model.call.error", async () => {
@@ -262,7 +278,9 @@ describe("llm two-signal close", () => {
     dispatch.diagnostic({ type: "model.call.error", ts: 1200, runId: "r", callId: "c-1", errorCategory: "ProviderTimeout", trace: { traceId: "t", spanId: "sp2" } });
     endRun(dispatch);
     await finish();
-    expect(exporter.getFinishedSpans().find(s => s.name === "chat")?.status.code).toBe(2);
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    assert(chat);
+    expect(chat.status.code).toBe(2);
   });
 });
 

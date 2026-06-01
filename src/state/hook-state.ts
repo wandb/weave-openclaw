@@ -3,6 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { BoundedMap } from "../util/bounded-map.js";
+import type { LlmOutputUsage } from "../handlers/hook-types.js";
 
 // Capture buffers shared between hooks and the diagnostic service: hooks hold
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
@@ -25,7 +26,7 @@ type ToolCallResultCapture = {
 
 type AssistantOutputBuffer = {
   texts: string[];
-  usage?: unknown;
+  usage?: LlmOutputUsage;
 };
 
 export type WeaveHookState = {

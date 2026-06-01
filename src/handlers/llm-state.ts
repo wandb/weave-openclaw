@@ -4,6 +4,7 @@
 
 import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
+import type { LlmOutputUsage } from "./hook-types.js";
 
 // llm_input/llm_output fire once per ATTEMPT (not per model.call), so chat spans
 // close here at run.completed with output texts attributed to spans positionally.
@@ -90,21 +91,18 @@ function shapeMessages(
   return out;
 }
 
-function toUsage(rawUsage: unknown): Usage | undefined {
-  if (!rawUsage || typeof rawUsage !== "object") return undefined;
-  const fields = rawUsage as Record<string, unknown>;
+function toUsage(raw: LlmOutputUsage): Usage | undefined {
+  if (!raw) return undefined;
   const usage: Usage = {
-    inputTokens: typeof fields.input === "number" ? fields.input : undefined,
-    outputTokens: typeof fields.output === "number" ? fields.output : undefined,
-    reasoningTokens: typeof fields.reasoning === "number" ? fields.reasoning : undefined,
-    cacheReadInputTokens: typeof fields.cacheRead === "number" ? fields.cacheRead : undefined,
-    cacheCreationInputTokens: typeof fields.cacheWrite === "number" ? fields.cacheWrite : undefined,
+    inputTokens: raw.input,
+    outputTokens: raw.output,
+    cacheReadInputTokens: raw.cacheRead,
+    cacheCreationInputTokens: raw.cacheWrite,
   };
   // Drop if nothing useful was set.
   if (
     usage.inputTokens === undefined &&
     usage.outputTokens === undefined &&
-    usage.reasoningTokens === undefined &&
     usage.cacheReadInputTokens === undefined &&
     usage.cacheCreationInputTokens === undefined
   ) {
