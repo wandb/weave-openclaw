@@ -151,16 +151,24 @@ describe("turn lifecycle", () => {
     expect(errored?.status.code).toBe(2);
   });
 
-  it("opens and closes a Session on session_start / session_end", async () => {
+  it("opens a Session on session_start, wraps the run's Turn, and closes on session_end", async () => {
     const { plugin, dispatch, finish } = await bootPlugin();
     dispatch.hook("session_start", { sessionKey: "s-1" });
     expect(plugin.registries.sessions.has("s-1")).toBe(true);
+    started(dispatch, "r-1", "s-1");
+    completed(dispatch, "r-1", "completed", "s-1");
     dispatch.hook("session_end", { sessionKey: "s-1" });
     expect(plugin.registries.sessions.has("s-1")).toBe(false);
     await finish();
-    // A childless Session emits no standalone span; it surfaces only as
-    // gen_ai.conversation.id on the Turns it wraps. Closing must not export an orphan.
-    expect(exporter.getFinishedSpans().map(s => s.name)).toMatchInlineSnapshot(`[]`);
+    // The Session surfaces only as gen_ai.conversation.id on the Turns it wraps; it
+    // never exports a standalone span, so the run's Turn is the only span emitted.
+    const spans = exporter.getFinishedSpans();
+    expect(spans.map(s => s.name)).toMatchInlineSnapshot(`
+      [
+        "invoke_agent",
+      ]
+    `);
+    expect(spans[0].attributes["gen_ai.conversation.id"]).toBe("s-1");
   });
 
   it("agent_end stamps success/duration (omits success when absent, honors false)", async () => {
