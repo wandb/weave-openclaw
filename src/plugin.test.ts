@@ -158,6 +158,9 @@ describe("turn lifecycle", () => {
     dispatch.hook("session_end", { sessionKey: "s-1" });
     expect(plugin.registries.sessions.has("s-1")).toBe(false);
     await finish();
+    // A childless Session emits no standalone span; it surfaces only as
+    // gen_ai.conversation.id on the Turns it wraps. Closing must not export an orphan.
+    expect(exporter.getFinishedSpans().map(s => s.name)).toMatchInlineSnapshot(`[]`);
   });
 
   it("agent_end stamps success/duration (omits success when absent, honors false)", async () => {

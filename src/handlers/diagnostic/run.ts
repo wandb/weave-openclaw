@@ -19,6 +19,8 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       if (!resolved) return;
       if (deps.registries.turns.has(event.runId)) return;
       const agentName = resolved.agentName ?? DEFAULT_AGENT_NAME;
+      // Lazy-create, not redundant with session_start: a run can reach us for a
+      // live sessionKey whose session_start we never saw (plugin started mid-session).
       const session = getOrCreateSession(deps, event.sessionKey, agentName);
       const turn = runIsolated(() =>
         session

@@ -7,8 +7,9 @@ import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
 import { DEFAULT_AGENT_NAME } from "../constants.js";
 
-// Return the registered Session for this key, starting and registering one if
-// absent. Returns undefined when there is no key (caller opens a root Turn).
+// Get-or-create the Session for this key, idempotent so its two callers (the
+// session_start hook and onRunStarted) can each be first. Returns undefined
+// when there is no key, so the caller opens a root Turn.
 export function getOrCreateSession(
   deps: HandlerDeps,
   sessionKey: string | undefined,
