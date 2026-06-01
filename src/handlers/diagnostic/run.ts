@@ -51,10 +51,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
     onRunAttempt(event: RunAttemptEvent): void {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      if (!Number.isFinite(event.attempt)) return;
-      turn.addEvent("run_attempt", {
-        "weave.run.attempt": Math.trunc(event.attempt),
-      });
+      turn.addEvent("run_attempt", { "weave.run.attempt": event.attempt });
     },
   };
 }
