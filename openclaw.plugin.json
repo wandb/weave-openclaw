@@ -2,7 +2,7 @@
   "id": "weave",
   "name": "W&B Weave",
   "version": "0.0.2",
-  "description": "Emit OpenClaw agent diagnostic events as OpenTelemetry spans to W&B Weave's Agents OTel endpoint (weave.* attributes, /agents/otel/v1/traces).",
+  "description": "Track OpenClaw agent sessions in W&B Weave for observability and debugging.",
   "activation": {
     "onStartup": true
   },
