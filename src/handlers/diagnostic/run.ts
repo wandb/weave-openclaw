@@ -30,7 +30,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       if (resolved.agentVersion)
         turn.setAttribute("weave.agent.version", resolved.agentVersion);
       if (resolved.agentDescription)
-        turn.setAttribute("weave.agent.description", resolved.agentDescription);
+        turn.setAttribute("gen_ai.agent.description", resolved.agentDescription);
       deps.registries.turns.set(event.runId, turn);
     },
 
