@@ -5,7 +5,7 @@
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { onInternalDiagnosticEvent } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { createWeaveHookState } from "./src/state/hook-state.js";
-import { createWeavePlugin, type WeavePlugin } from "./src/plugin.js";
+import { createWeavePlugin, renderStatus, type WeavePlugin } from "./src/plugin.js";
 
 // register(api) can run multiple times (setup/runtime, hot-reload); cache the
 // instance + subscription on globalThis so a re-import doesn't make a stale duplicate.
@@ -59,5 +59,12 @@ export default definePluginEntry({
     api.on("message_received", (event, ctx) => hooks.message_received?.(event, ctx));
 
     api.registerService(plugin.service);
+
+    api.registerCommand({
+      name: "weave",
+      description: "Show W&B Weave plugin status",
+      acceptsArgs: true,
+      handler: () => ({ text: renderStatus(plugin) }),
+    });
   },
 });

@@ -40,15 +40,15 @@ describe("createWeavePlugin lifecycle", () => {
   it("starts running and exposes a config snapshot, then stops", async () => {
     const { createWeavePlugin } = await import("./plugin.js");
     const plugin = createWeavePlugin({
-      pluginConfig: { entity: "rgao", project: "p", apiKey: "k", serviceName: "svc-x" },
+      pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent" },
       hookState: createWeaveHookState(),
     });
     await plugin.service.start({ logger: makeLogger(), config: {} } as any);
     const status = plugin.getStatus();
     expect(status.lifecycle).toBe("running");
     assert(status.config);
-    expect(status.config.projectId).toBe("rgao/p");
-    expect(status.config.serviceName).toBe("svc-x");
+    expect(status.config.projectId).toBe("my-team/my-project");
+    expect(status.config.serviceName).toBe("openclaw-agent");
     expect(status.config.authSource).toBe("literal");
     expect(status.counts).toEqual({ turns: 0, calls: 0, tools: 0, subagents: 0 });
 
@@ -61,7 +61,7 @@ describe("createWeavePlugin lifecycle", () => {
 
     const disabledLog = makeLogger();
     const disabled = createWeavePlugin({
-      pluginConfig: { enabled: false, entity: "e", project: "p" },
+      pluginConfig: { enabled: false, entity: "my-team", project: "my-project" },
       hookState: createWeaveHookState(),
     });
     await disabled.service.start({ logger: disabledLog, config: {} } as any);
@@ -71,8 +71,8 @@ describe("createWeavePlugin lifecycle", () => {
     const errorLog = makeLogger();
     const errored = createWeavePlugin({
       pluginConfig: {
-        entity: "e",
-        project: "p",
+        entity: "my-team",
+        project: "my-project",
         apiKey: { source: "file", id: "/tmp/weave-missing-key-" + Date.now(), provider: "x" },
       },
       hookState: createWeaveHookState(),
