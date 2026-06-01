@@ -5,8 +5,7 @@
 import { runIsolated, startSession, type Session } from "weave";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
-
-const DEFAULT_AGENT_NAME = "openclaw-agent";
+import { DEFAULT_AGENT_NAME } from "../constants.js";
 
 // Return the registered Session for this key, starting and registering one if
 // absent. Returns undefined when there is no key (caller opens a root Turn).

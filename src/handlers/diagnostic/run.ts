@@ -6,12 +6,11 @@ import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
 import { getOrCreateSession } from "../hooks/session.js";
+import { DEFAULT_AGENT_NAME } from "../constants.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
 type RunAttemptEvent = Extract<DiagnosticEventPayload, { type: "run.attempt" }>;
-
-const DEFAULT_AGENT_NAME = "openclaw-agent";
 
 export function createRunDiagnosticHandlers(deps: HandlerDeps) {
   return {
