@@ -55,9 +55,9 @@ describe("resolveConfig", () => {
     // @ts-expect-error entity and project are required by the type, not just at runtime
     await expect(resolveConfig({}, ctx())).rejects.toThrow(/entity|project/);
 
-    const cfg = await resolveConfig({ entity: "acme", project: "agent-traces" }, ctx());
-    expect(cfg.entity).toBe("acme");
-    expect(cfg.projectId).toBe("acme/agent-traces");
+    const cfg = await resolveConfig({ entity: "my-team", project: "my-project" }, ctx());
+    expect(cfg.entity).toBe("my-team");
+    expect(cfg.projectId).toBe("my-team/my-project");
   });
 
   it("applies field defaults (captureContent, agentVersion, flush clamp)", async () => {
