@@ -71,8 +71,9 @@ without them:
 - `hooks.allowConversationAccess: true`: OpenClaw treats prompts and
   replies as sensitive and won't hand them to a third-party plugin unless
   you opt in here. Without it, your model-call spans lose the prompts,
-  responses, and per-call token counts. Trace structure, tool inputs and
-  results, and run-level cost and token totals still come through.
+  responses, and per-call token counts, and your tool spans lose their
+  inputs and results. Trace structure and run-level cost and token
+  totals still come through.
 
 ## Configuration
 
@@ -173,14 +174,16 @@ The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai
    `/weave status` prints them as `project=<entity>/<project>`.
 4. Check which key is being used. `/weave status` prints `auth=...`. If it
    points at the wrong place, fix the key.
+5. If runs appear but the model calls, tool calls, or messages are empty,
+   you likely need `hooks.allowConversationAccess: true` (see below).
 
 ### Traces show up but the messages are blank
 
 This means OpenClaw is hiding the conversation text. Set
 `hooks.allowConversationAccess: true` in your config (under
-`plugins.entries.weave`) and restart the gateway. The span structure, tool
-inputs and results, and run-level cost and token totals come through either
-way; the prompts, model responses, and per-call token counts need this
+`plugins.entries.weave`) and restart the gateway. The span structure and
+run-level cost and token totals come through either way; the prompts, model
+responses, per-call token counts, and tool inputs and results need this
 setting. If you check the gateway log, you'll see lines about hooks being
 "blocked."
 
@@ -191,7 +194,3 @@ setting. If you check the gateway log, you'll see lines about hooks being
 | A `401` or `403` error | The API key is wrong or doesn't have access | Check that the key is current and that your team owns the entity and project. `wandb login` refreshes it. |
 | A `404` error | Wrong server address | On a dedicated or self-hosted install, set `WANDB_BASE_URL` to your install's address. |
 | Connection refused or DNS error | Network, proxy, or firewall | Make sure the machine running the gateway can reach W&B (or your install) on port 443. |
-
-## License
-
-MIT, see [LICENSE](./LICENSE).
