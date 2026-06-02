@@ -80,5 +80,10 @@ jobs:
       - name: Build package
         run: pnpm build
 
-      - name: Publish to npm
-        run: pnpm publish --no-git-checks --access public
+      # package.json carries the scoped name (@wandb/weave-openclaw) so ClawHub
+      # publishing works, where the scope must match the publish owner. npm keeps
+      # the original unscoped name, so rewrite it back before publishing here.
+      - name: Publish to npm (unscoped name)
+        run: |
+          npm pkg set name=weave-openclaw
+          pnpm publish --no-git-checks --access public
