@@ -1,5 +1,5 @@
 {
-  "name": "weave-openclaw",
+  "name": "@wandb/weave-openclaw",
   "version": "0.1.0",
   "description": "OpenClaw plugin that traces agent sessions to W&B Weave for observability and debugging.",
   "license": "MIT",
