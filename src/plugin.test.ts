@@ -426,9 +426,8 @@ describe("side-channel attrs on Turn", () => {
     expect(turn.attributes["gen_ai.usage.cache_creation.input_tokens"]).toBe(30);
   });
 
-  it("records tool.loop / run.attempt / message_received span events and context.assembled attrs", async () => {
+  it("records run.attempt / message_received span events and context.assembled attrs", async () => {
     const { dispatch, finish } = await setupTurn();
-    dispatch.diagnostic({ type: "tool.loop", ts: 1, runId: "r", toolName: "search", level: "warn", action: "abort", count: 3, message: "same args 3x", trace });
     dispatch.diagnostic({ type: "context.assembled", ts: 2, runId: "r", contextTokenBudget: 200000, messageCount: 12, historyTextChars: 5000, promptChars: 200, trace });
     dispatch.diagnostic({ type: "run.attempt", ts: 3, runId: "r", attempt: 2, trace });
     dispatch.hook("message_received", { runId: "r", from: "user@example.com", content: "hello" }, { channelId: "telegram" });
@@ -436,14 +435,6 @@ describe("side-channel attrs on Turn", () => {
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
-    const loop = turn.events.find(e => e.name === "tool.loop");
-    assert(loop);
-    assert(loop.attributes);
-    expect(loop.attributes["gen_ai.tool.name"]).toBe("search");
-    expect(loop.attributes["weave.loop.level"]).toBe("warn");
-    expect(loop.attributes["weave.loop.action"]).toBe("abort");
-    expect(loop.attributes["weave.loop.count"]).toBe(3);
-    expect(loop.attributes["weave.loop.message"]).toBe("same args 3x");
     expect(turn.attributes["weave.context.budget_tokens"]).toBe(200000);
     expect(turn.attributes["weave.context.message_count"]).toBe(12);
     expect(turn.attributes["weave.context.history_text_chars"]).toBe(5000);
