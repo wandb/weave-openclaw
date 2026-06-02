@@ -19,4 +19,7 @@ export type HandlerDeps = {
   getLogger: () => HandlerLogger | undefined;
   costByRun: BoundedMap<string, number>;
   pendingCompactionByRun: BoundedMap<string, { itemsBefore: number }>;
+  // tool.loop events carry sessionKey but no runId; this maps the session's
+  // active run back to its Turn so loop events can attach.
+  runIdBySession: BoundedMap<string, string>;
 };
