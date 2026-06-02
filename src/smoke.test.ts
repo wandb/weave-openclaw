@@ -2,10 +2,8 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { describe, it, expect, beforeEach, vi, assert } from "vitest";
-import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { init as weaveInit, startTurn } from "weave";
-import { bootPlugin } from "./test/helpers.js";
+import { describe, it, expect, vi, assert } from "vitest";
+import { bootPlugin, pinInMemoryExporter } from "./test/helpers.js";
 
 // Stub weave.login so the smoke doesn't hit the live server or write ~/.netrc.
 vi.mock("weave", async (importOriginal) => {
@@ -13,20 +11,7 @@ vi.mock("weave", async (importOriginal) => {
   return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
 });
 
-const exporter = new InMemorySpanExporter();
-
-beforeEach(async () => {
-  exporter.reset();
-  vi.stubEnv("WANDB_API_KEY", "test-key");
-  await weaveInit("test/test", {
-    genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
-  });
-  // Provider is first-call-wins; pin the in-memory processor (the warmup turn
-  // forces it to build) before the plugin's init() builds the real OTLP
-  // exporter — see plugin.test.ts for the longer note.
-  startTurn({ agentName: "warmup" }).end();
-  exporter.reset();
-});
+const exporter = pinInMemoryExporter();
 
 describe("end-to-end smoke", () => {
   it("emits a clean trace for a session + run + chat + tool sequence", async () => {
@@ -77,12 +62,17 @@ describe("end-to-end smoke", () => {
         "gen_ai.tool.name": "search",
       }
     `);
-    expect(turn.attributes).toMatchInlineSnapshot(`
+    // weave.agent.version is the package version (asserted by value in
+    // plugin.test.ts); here just confirm it's stamped, so a version bump never
+    // churns this end-to-end snapshot.
+    expect(turn.attributes).toHaveProperty("weave.agent.version");
+    const turnAttrs: Record<string, unknown> = { ...turn.attributes };
+    delete turnAttrs["weave.agent.version"];
+    expect(turnAttrs).toMatchInlineSnapshot(`
       {
         "gen_ai.agent.name": "test-agent",
         "gen_ai.conversation.id": "s-1",
         "gen_ai.operation.name": "invoke_agent",
-        "weave.agent.version": "0.1.0",
         "weave.cost.usd": 0.0001,
         "weave.outcome": "completed",
       }

@@ -2,11 +2,9 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { describe, it, expect, beforeEach, afterEach, vi, assert } from "vitest";
-import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { init as weaveInit, startTurn } from "weave";
+import { describe, it, expect, afterEach, vi, assert } from "vitest";
 import { createWeaveHookState } from "./state/hook-state.js";
-import { bootPlugin, makeFakeApi, makeLogger } from "./test/helpers.js";
+import { bootPlugin, makeLogger, pinInMemoryExporter } from "./test/helpers.js";
 
 // Stub weave.login so tests don't hit the live server or write ~/.netrc.
 vi.mock("weave", async (importOriginal) => {
@@ -14,20 +12,7 @@ vi.mock("weave", async (importOriginal) => {
   return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
 });
 
-const exporter = new InMemorySpanExporter();
-
-beforeEach(async () => {
-  exporter.reset();
-  vi.stubEnv("WANDB_API_KEY", "test-key");
-  await weaveInit("test/test", {
-    genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
-  });
-  // Provider is first-call-wins; pin an in-memory processor (the warmup turn
-  // forces it to build) before the plugin's init(), else init builds the real
-  // OTLP exporter and stop()'s flush egresses to W&B instead of staying local.
-  startTurn({ agentName: "warmup" }).end();
-  exporter.reset();
-});
+const exporter = pinInMemoryExporter();
 
 // Shared run-lifecycle dispatch for the diagnostic suites below.
 const trace = { traceId: "t", spanId: "sp" };

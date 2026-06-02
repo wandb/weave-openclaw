@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { vi } from "vitest";
+import { vi, beforeEach } from "vitest";
+import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { createWeaveHookState } from "../state/hook-state.js";
 
-// Weave SDK setup (vi.mock for `weave`, the InMemorySpanExporter, the warmup
-// `beforeEach`) stays inside each test file because vi.mock is hoisted per-file
-// and the SDK provider is first-call-wins per process — sharing the exporter
-// across files via this helper would let the first imported file pin its
-// exporter for the whole run.
+// vi.mock("weave", ...) must stay in each test file: vitest hoists it to the top
+// of the importing file, so it can't move here. The exporter + warmup-pin setup
+// is not file-specific though, so pinInMemoryExporter() centralizes it; each
+// file calls it once for its own exporter (the SDK tracing provider is
+// first-call-wins per process, and vitest isolates test files).
 
 export function makeLogger() {
   return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
@@ -52,4 +53,24 @@ export function makeFakeApi(plugin: any) {
       plugin.handlers.diagnostic(event, { trusted: true });
     },
   };
+}
+
+// Register a per-file beforeEach that pins a fresh InMemorySpanExporter as the
+// weave tracing provider before any plugin init() builds the real OTLP exporter
+// (provider is first-call-wins; the warmup turn forces it to build). Call once
+// at module scope per test file; read finished spans off the returned exporter.
+export function pinInMemoryExporter() {
+  const exporter = new InMemorySpanExporter();
+  beforeEach(async () => {
+    exporter.reset();
+    vi.stubEnv("WANDB_API_KEY", "test-key");
+    // Dynamic import so the per-file vi.mock("weave", ...) is applied first.
+    const { init: weaveInit, startTurn } = await import("weave");
+    await weaveInit("test/test", {
+      genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
+    });
+    startTurn({ agentName: "warmup" }).end();
+    exporter.reset();
+  });
+  return exporter;
 }
