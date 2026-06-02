@@ -110,7 +110,7 @@ default.
           captureContent: true,
 
           // How often (in milliseconds) traces are sent.
-          flushIntervalMs: 5000,
+          flushIntervalMs: 1000,
         },
         hooks: { allowConversationAccess: true },
       },
