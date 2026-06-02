@@ -582,7 +582,6 @@ describe("subagent and compaction", () => {
     assert(ev.attributes);
     expect(ev.attributes["weave.compaction.items_before"]).toBe(50);
     expect(ev.attributes["weave.compaction.items_after"]).toBe(10);
-    expect(ev.attributes["weave.compaction.tokens"]).toBe(20000);
   });
 
   it("infers items_before from after_compaction.compactedCount when before_compaction never fired", async () => {

@@ -34,12 +34,10 @@ export function createCompactionHookHandlers(deps: HandlerDeps): {
 
       // When before_compaction never fired, reconstruct the pre-compaction count
       // as the survivors plus the number compacted away.
-      const attrs: Record<string, number> = {
+      turn.addEvent("context_compacted", {
         "weave.compaction.items_before": before?.itemsBefore ?? event.messageCount + event.compactedCount,
         "weave.compaction.items_after": event.messageCount,
-      };
-      if (typeof event.tokenCount === "number") attrs["weave.compaction.tokens"] = event.tokenCount;
-      turn.addEvent("context_compacted", attrs);
+      });
     },
   };
 }
