@@ -546,8 +546,11 @@ describe("subagent and compaction", () => {
     completed(dispatch);
     await finish();
     const spans = exporter.getFinishedSpans();
-    expect(spans.find(s => s.attributes["gen_ai.agent.name"] === "researcher")).toBeDefined();
-    expect(spans.find(s => s.attributes["gen_ai.agent.name"] === "broken")?.status.code).toBe(2);
+    const researcher = spans.find(s => s.attributes["gen_ai.agent.name"] === "researcher");
+    const broken = spans.find(s => s.attributes["gen_ai.agent.name"] === "broken");
+    assert(researcher);
+    assert(broken);
+    expect(broken.status.code).toBe(2);
     // The requester Turn is the invoke_agent span that recorded the spawn events;
     // sub-agent spans are also invoke_agent but carry the sub's gen_ai.agent.name.
     const requester = spans.find(s => s.name === "invoke_agent" && s.events.some(e => e.name === "subagent_spawned"));
