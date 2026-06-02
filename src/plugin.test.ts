@@ -576,9 +576,10 @@ describe("subagent and compaction", () => {
     await finish();
     const ev = compactedEvent();
     assert(ev);
-    expect(ev.attributes?.["items_before"]).toBe(50);
-    expect(ev.attributes?.["items_after"]).toBe(10);
-    expect(ev.attributes?.["tokens"]).toBe(20000);
+    assert(ev.attributes);
+    expect(ev.attributes["weave.compaction.items_before"]).toBe(50);
+    expect(ev.attributes["weave.compaction.items_after"]).toBe(10);
+    expect(ev.attributes["weave.compaction.tokens"]).toBe(20000);
   });
 
   it("infers items_before from after_compaction.compactedCount when before_compaction never fired", async () => {
@@ -588,7 +589,8 @@ describe("subagent and compaction", () => {
     await finish();
     const ev = compactedEvent();
     assert(ev);
-    expect(ev.attributes?.["items_before"]).toBe(40);
-    expect(ev.attributes?.["items_after"]).toBe(10);
+    assert(ev.attributes);
+    expect(ev.attributes["weave.compaction.items_before"]).toBe(40);
+    expect(ev.attributes["weave.compaction.items_after"]).toBe(10);
   });
 });

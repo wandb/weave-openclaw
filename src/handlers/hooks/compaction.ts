@@ -32,11 +32,14 @@ export function createCompactionHookHandlers(deps: HandlerDeps): {
       const before = deps.pendingCompactionByRun.get(runId);
       deps.pendingCompactionByRun.delete(runId);
 
-      turn.addEvent("context_compacted", {
-        items_before: before?.itemsBefore ?? event.messageCount + event.compactedCount,
-        items_after: event.messageCount,
-        tokens: event.tokenCount ?? 0,
-      });
+      // When before_compaction never fired, reconstruct the pre-compaction count
+      // as the survivors plus the number compacted away.
+      const attrs: Record<string, number> = {
+        "weave.compaction.items_before": before?.itemsBefore ?? event.messageCount + event.compactedCount,
+        "weave.compaction.items_after": event.messageCount,
+      };
+      if (typeof event.tokenCount === "number") attrs["weave.compaction.tokens"] = event.tokenCount;
+      turn.addEvent("context_compacted", attrs);
     },
   };
 }
