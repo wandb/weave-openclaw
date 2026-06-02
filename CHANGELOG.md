@@ -16,7 +16,8 @@ Weave's Agents endpoint via the `weave.genai` Node SDK.
   the active Turn via the SDK's `setAttribute` / `addEvent` surface.
 
 ### Operator ergonomics
-- Startup log reports `auth`, `flushIntervalMs`, `captureContent`,
-  `project`, `service`, and `agentVersion`.
-- `/weave status` command surfaces lifecycle, config, and counts.
+- Startup log reports `project`, `service`, `agentVersion`, `auth`,
+  and `captureContent`.
+- `/weave status` command surfaces lifecycle, config (including
+  `flushIntervalMs`), and counts.
 - README covers install, configure, and a troubleshooting checklist.
