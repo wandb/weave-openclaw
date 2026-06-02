@@ -17,7 +17,6 @@ Weave's Agents endpoint via the `weave.genai` Node SDK.
 
 ### Operator ergonomics
 - Startup log reports `auth`, `flushIntervalMs`, `captureContent`,
-  `project`, `service`, and `agentVersion`. The W&B API key is
-  never logged.
+  `project`, `service`, and `agentVersion`.
 - `/weave status` command surfaces lifecycle, config, and counts.
 - README covers install, configure, and a troubleshooting checklist.
