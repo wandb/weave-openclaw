@@ -58,6 +58,14 @@ const started = (d: any, runId = "r", sessionKey = "s") =>
 const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
   d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
 
+// Boot a running plugin and open the default "r" Turn (the start of every per-run
+// suite). Tests close it with `completed(dispatch)` + `await finish()`.
+async function setupTurn(extraConfig: Record<string, unknown> = {}) {
+  const ctx = await bootPlugin(extraConfig);
+  started(ctx.dispatch);
+  return ctx;
+}
+
 function makeFakeApi(plugin: any) {
   return {
     hook(name: string, event: any, ctx?: any) {
@@ -227,12 +235,6 @@ describe("turn lifecycle", () => {
 });
 
 describe("llm two-signal close", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin();
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("buffers llm_input before model_call_started, promotes it, and closes the chat span with model + usage", async () => {
     const { dispatch, hookState, finish } = await setupTurn();
     dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "be helpful" });
@@ -323,12 +325,6 @@ describe("closeRunChatSpans positional attribution", () => {
 });
 
 describe("tool lifecycle", () => {
-  async function setupTurn(captureContent = true) {
-    const ctx = await bootPlugin({ captureContent });
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
     const { dispatch, finish } = await setupTurn();
     // completed, with captured args + result
@@ -361,7 +357,7 @@ describe("tool lifecycle", () => {
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
-    const { dispatch, finish } = await setupTurn(false);
+    const { dispatch, finish } = await setupTurn({ captureContent: false });
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
     dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
     dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
@@ -403,12 +399,6 @@ describe("tool lifecycle", () => {
   });
 });
 describe("side-channel attrs on Turn", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin({ captureContent: true });
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("accumulates cost and stamps usage totals from model.usage", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace });
@@ -542,12 +532,6 @@ describe("hot-reload / lifecycle", () => {
 });
 
 describe("subagent and compaction", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin();
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   const compactedEvent = () =>
     exporter.getFinishedSpans()
       .find(s => s.name === "invoke_agent")
