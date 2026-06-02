@@ -68,10 +68,11 @@ without them:
 
 - `diagnostics.enabled: true`: without this, OpenClaw doesn't report what
   your agents are doing, so there's nothing for the plugin to send.
-- `hooks.allowConversationAccess: true`: without this, OpenClaw withholds
-  the conversation, so your model-call and tool spans arrive empty: no
-  prompts, responses, per-call token counts, or tool inputs and results.
-  Only run-level cost and token totals still come through.
+- `hooks.allowConversationAccess: true`: OpenClaw treats prompts and
+  replies as sensitive and won't hand them to a third-party plugin unless
+  you opt in here. Without it, your model-call spans lose the prompts,
+  responses, and per-call token counts. Trace structure, tool inputs and
+  results, and run-level cost and token totals still come through.
 
 ## Configuration
 
@@ -177,11 +178,11 @@ The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai
 
 This means OpenClaw is hiding the conversation text. Set
 `hooks.allowConversationAccess: true` in your config (under
-`plugins.entries.weave`) and restart the gateway. The span structure and
-run-level cost and token totals come through either way, but the
-conversation, per-call token counts, tool inputs, and tool results all need
-this setting. If you check the gateway log, you'll see lines about hooks
-being "blocked."
+`plugins.entries.weave`) and restart the gateway. The span structure, tool
+inputs and results, and run-level cost and token totals come through either
+way; the prompts, model responses, and per-call token counts need this
+setting. If you check the gateway log, you'll see lines about hooks being
+"blocked."
 
 ### Traces aren't reaching W&B
 
