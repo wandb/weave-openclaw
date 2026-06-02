@@ -2,10 +2,25 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { describe, it, expect, beforeEach, afterEach, vi, assert } from "vitest";
-import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
-import { init as weaveInit, startTurn } from "weave";
+import { describe, it, expect, afterEach, vi, assert } from "vitest";
 import { createWeaveHookState } from "./state/hook-state.js";
+import {
+  bootPlugin,
+  makeLogger,
+  pinInMemoryExporter,
+  setupTurn,
+  TRACE,
+  runStarted,
+  runCompleted,
+  modelCallStarted,
+  modelCallCompleted,
+  modelCallError,
+  toolStarted,
+  toolCompleted,
+  toolError,
+  toolBlocked,
+  modelUsage,
+} from "./test/helpers.js";
 
 // Stub weave.login so tests don't hit the live server or write ~/.netrc.
 vi.mock("weave", async (importOriginal) => {
@@ -13,70 +28,7 @@ vi.mock("weave", async (importOriginal) => {
   return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
 });
 
-const exporter = new InMemorySpanExporter();
-
-beforeEach(async () => {
-  exporter.reset();
-  vi.stubEnv("WANDB_API_KEY", "test-key");
-  await weaveInit("test/test", {
-    genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
-  });
-  // Provider is first-call-wins; pin an in-memory processor (the warmup turn
-  // forces it to build) before the plugin's init(), else init builds the real
-  // OTLP exporter and stop()'s flush egresses to W&B instead of staying local.
-  startTurn({ agentName: "warmup" }).end();
-  exporter.reset();
-});
-
-function makeLogger() {
-  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-}
-
-// Start a running plugin and a fake event dispatcher for the turn-lifecycle suite.
-async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
-  const { createWeavePlugin } = await import("./plugin.js");
-  const hookState = createWeaveHookState();
-  const logger = makeLogger();
-  const plugin = createWeavePlugin({
-    pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent", ...extraConfig },
-    hookState,
-  });
-  await plugin.service.start({ logger, config: {} } as any);
-  return {
-    plugin,
-    hookState,
-    logger,
-    dispatch: makeFakeApi(plugin),
-    finish: () => plugin.service.stop({ logger } as any),
-  };
-}
-
-// Shared run-lifecycle dispatch for the diagnostic suites below.
-const trace = { traceId: "t", spanId: "sp" };
-const started = (d: any, runId = "r", sessionKey = "s") =>
-  d.diagnostic({ type: "run.started", ts: 1000, runId, sessionKey, trace });
-const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
-  d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
-
-// Boot a running plugin and open the default "r" Turn (the start of every per-run
-// suite). Tests close it with `completed(dispatch)` + `await finish()`.
-async function setupTurn(extraConfig: Record<string, unknown> = {}) {
-  const ctx = await bootPlugin(extraConfig);
-  started(ctx.dispatch);
-  return ctx;
-}
-
-function makeFakeApi(plugin: any) {
-  return {
-    hook(name: string, event: any, ctx?: any) {
-      const handler = plugin.handlers.hook[name];
-      if (handler) handler(event, ctx ?? {});
-    },
-    diagnostic(event: any) {
-      plugin.handlers.diagnostic(event, { trusted: true });
-    },
-  };
-}
+const exporter = pinInMemoryExporter();
 
 describe("createWeavePlugin lifecycle", () => {
   afterEach(() => {
@@ -132,9 +84,9 @@ describe("createWeavePlugin lifecycle", () => {
 describe("turn lifecycle", () => {
   it("opens the invoke_agent Turn on run.started and ends it (with a default agent name) on run.completed", async () => {
     const { plugin, dispatch, finish } = await bootPlugin(); // no explicit agentName
-    started(dispatch, "r-1");
+    runStarted(dispatch, { runId: "r-1" });
     expect(plugin.registries.turns.has("r-1")).toBe(true);
-    completed(dispatch, "r-1");
+    runCompleted(dispatch, { runId: "r-1" });
     await finish();
     expect(plugin.registries.turns.has("r-1")).toBe(false);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
@@ -144,7 +96,7 @@ describe("turn lifecycle", () => {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -152,10 +104,10 @@ describe("turn lifecycle", () => {
 
   it("maps outcome to span status: aborted stays OK, error marks ERROR (weave.outcome stamped)", async () => {
     const { dispatch, finish } = await bootPlugin();
-    started(dispatch, "r-ok", "s-ok");
-    completed(dispatch, "r-ok", "aborted", "s-ok");
-    started(dispatch, "r-bad", "s-bad");
-    completed(dispatch, "r-bad", "error", "s-bad");
+    runStarted(dispatch, { runId: "r-ok", sessionKey: "s-ok" });
+    runCompleted(dispatch, { runId: "r-ok", outcome: "aborted", sessionKey: "s-ok" });
+    runStarted(dispatch, { runId: "r-bad", sessionKey: "s-bad" });
+    runCompleted(dispatch, { runId: "r-bad", outcome: "error", sessionKey: "s-bad" });
     await finish();
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     const aborted = spans.find(s => s.attributes["weave.outcome"] === "aborted");
@@ -170,8 +122,8 @@ describe("turn lifecycle", () => {
     const { plugin, dispatch, finish } = await bootPlugin();
     dispatch.hook("session_start", { sessionKey: "s-1" });
     expect(plugin.registries.sessions.has("s-1")).toBe(true);
-    started(dispatch, "r-1", "s-1");
-    completed(dispatch, "r-1", "completed", "s-1");
+    runStarted(dispatch, { runId: "r-1", sessionKey: "s-1" });
+    runCompleted(dispatch, { runId: "r-1", sessionKey: "s-1" });
     dispatch.hook("session_end", { sessionKey: "s-1" });
     expect(plugin.registries.sessions.has("s-1")).toBe(false);
     await finish();
@@ -188,15 +140,15 @@ describe("turn lifecycle", () => {
 
   it("agent_end stamps success/duration (omits success when absent, honors false)", async () => {
     const { dispatch, finish } = await bootPlugin();
-    started(dispatch, "r-yes");
+    runStarted(dispatch, { runId: "r-yes" });
     dispatch.hook("agent_end", { runId: "r-yes", success: true, durationMs: 1500 });
-    completed(dispatch, "r-yes");
-    started(dispatch, "r-absent");
+    runCompleted(dispatch, { runId: "r-yes" });
+    runStarted(dispatch, { runId: "r-absent" });
     dispatch.hook("agent_end", { runId: "r-absent", durationMs: 100 });
-    completed(dispatch, "r-absent");
-    started(dispatch, "r-false");
+    runCompleted(dispatch, { runId: "r-absent" });
+    runStarted(dispatch, { runId: "r-false" });
     dispatch.hook("agent_end", { runId: "r-false", success: false });
-    completed(dispatch, "r-false");
+    runCompleted(dispatch, { runId: "r-false" });
     await finish();
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     expect(spans).toHaveLength(3);
@@ -207,7 +159,7 @@ describe("turn lifecycle", () => {
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 1500,
         "weave.agent.success": true,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -217,7 +169,7 @@ describe("turn lifecycle", () => {
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 100,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -227,7 +179,7 @@ describe("turn lifecycle", () => {
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.success": false,
-        "weave.agent.version": "0.0.2",
+        "weave.agent.version": "0.1.0",
         "weave.outcome": "completed",
       }
     `);
@@ -242,10 +194,10 @@ describe("llm two-signal close", () => {
     dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
     expect(hookState.pendingLlmInputByRun.has("r")).toBe(false);
     expect(hookState.llmInputs.has("c-1")).toBe(true);
-    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "sp2" });
     dispatch.hook("llm_output", { runId: "r", assistantTexts: ["hello"], usage: { input: 5, output: 3 } });
-    dispatch.diagnostic({ type: "model.call.completed", ts: 1500, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "sp2" } });
-    completed(dispatch);
+    modelCallCompleted(dispatch, { callId: "c-1", spanId: "sp2" });
+    runCompleted(dispatch);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
@@ -270,9 +222,9 @@ describe("llm two-signal close", () => {
   it("marks the chat span ERROR on model.call.error", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
-    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "sp2", parentSpanId: "sp" } });
-    dispatch.diagnostic({ type: "model.call.error", ts: 1200, runId: "r", callId: "c-1", errorCategory: "ProviderTimeout", trace: { traceId: "t", spanId: "sp2" } });
-    completed(dispatch);
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "sp2" });
+    modelCallError(dispatch, { callId: "c-1", spanId: "sp2", errorCategory: "ProviderTimeout" });
+    runCompleted(dispatch);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
     assert(chat);
@@ -283,14 +235,14 @@ describe("llm two-signal close", () => {
 describe("closeRunChatSpans positional attribution", () => {
   async function twoCallRun(texts: string[]) {
     const { dispatch, finish } = await bootPlugin();
-    started(dispatch);
+    runStarted(dispatch);
     for (const callId of ["c-1", "c-2"]) {
       dispatch.hook("model_call_started", { runId: "r", callId });
-      dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId, model: "gpt-4o", trace: { traceId: "t", spanId: callId, parentSpanId: "sp" } });
-      dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId, trace: { traceId: "t", spanId: callId } });
+      modelCallStarted(dispatch, { callId, spanId: callId });
+      modelCallCompleted(dispatch, { callId, spanId: callId });
     }
     dispatch.hook("llm_output", { runId: "r", assistantTexts: texts });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     return exporter.getFinishedSpans().filter(s => s.name === "chat").map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
   }
@@ -312,12 +264,12 @@ describe("closeRunChatSpans positional attribution", () => {
 
   it("warns when llm_output text count drifts from the tracked chat-span count", async () => {
     const { dispatch, finish, logger } = await bootPlugin();
-    started(dispatch);
+    runStarted(dispatch);
     dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
-    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r", callId: "c-1", model: "gpt-4o", trace: { traceId: "t", spanId: "cs1", parentSpanId: "sp" } });
-    dispatch.diagnostic({ type: "model.call.completed", ts: 1150, runId: "r", callId: "c-1", trace: { traceId: "t", spanId: "cs1" } });
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "cs1" });
+    modelCallCompleted(dispatch, { callId: "c-1", spanId: "cs1" });
     dispatch.hook("llm_output", { runId: "r", assistantTexts: ["a", "b"] }); // 2 texts, 1 tracked span
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const warned = (logger.warn as any).mock.calls.map((c: any[]) => String(c[0])).some((m: string) => m.includes("did not match tracked chat-span count"));
     expect(warned).toBe(true);
@@ -329,16 +281,16 @@ describe("tool lifecycle", () => {
     const { dispatch, finish } = await setupTurn();
     // completed, with captured args + result
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-1", toolName: "search", params: { q: "weave" } });
-    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-1", toolName: "search", trace: { traceId: "t", spanId: "tc1", parentSpanId: "sp" } });
+    toolStarted(dispatch, { toolCallId: "tc-1", spanId: "tc1" });
     dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-1", result: { hits: 7 } });
-    dispatch.diagnostic({ type: "tool.execution.completed", ts: 1300, runId: "r", toolCallId: "tc-1", trace: { traceId: "t", spanId: "tc1" } });
+    toolCompleted(dispatch, { toolCallId: "tc-1", spanId: "tc1" });
     // errored
-    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-2", toolName: "search", trace: { traceId: "t", spanId: "tc2", parentSpanId: "sp" } });
-    dispatch.diagnostic({ type: "tool.execution.error", ts: 1300, runId: "r", toolCallId: "tc-2", errorCategory: "Timeout", trace: { traceId: "t", spanId: "tc2" } });
+    toolStarted(dispatch, { toolCallId: "tc-2", spanId: "tc2" });
+    toolError(dispatch, { toolCallId: "tc-2", spanId: "tc2", errorCategory: "Timeout" });
     // blocked
-    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-3", toolName: "search", trace: { traceId: "t", spanId: "tc3", parentSpanId: "sp" } });
-    dispatch.diagnostic({ type: "tool.execution.blocked", ts: 1300, runId: "r", toolCallId: "tc-3", trace: { traceId: "t", spanId: "tc3" } });
-    completed(dispatch);
+    toolStarted(dispatch, { toolCallId: "tc-3", spanId: "tc3" });
+    toolBlocked(dispatch, { toolCallId: "tc-3", spanId: "tc3" });
+    runCompleted(dispatch);
     await finish();
     const byId = (id: string) => exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === id);
     const ok = byId("tc-1");
@@ -359,10 +311,10 @@ describe("tool lifecycle", () => {
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
     const { dispatch, finish } = await setupTurn({ captureContent: false });
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
-    dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
+    toolStarted(dispatch, { toolCallId: "tc-nc", spanId: "tcnc" });
     dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
-    dispatch.diagnostic({ type: "tool.execution.completed", ts: 1300, runId: "r", toolCallId: "tc-nc", trace: { traceId: "t", spanId: "tcnc" } });
-    completed(dispatch);
+    toolCompleted(dispatch, { toolCallId: "tc-nc", spanId: "tcnc" });
+    runCompleted(dispatch);
     await finish();
     const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-nc");
     assert(span); // the execute_tool span is still emitted; only its content is withheld
@@ -383,7 +335,7 @@ describe("tool lifecycle", () => {
       count: 3,
       message: "repeated tool call",
     });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
@@ -401,10 +353,10 @@ describe("tool lifecycle", () => {
 describe("side-channel attrs on Turn", () => {
   it("accumulates cost and stamps usage totals from model.usage", async () => {
     const { dispatch, finish } = await setupTurn();
-    dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace });
-    dispatch.diagnostic({ type: "model.usage", ts: 2, runId: "r", costUsd: 0.10, trace });
-    dispatch.diagnostic({ type: "model.usage", ts: 3, runId: "r", usage: { input: 100, output: 50, cacheRead: 200, cacheWrite: 30, total: 380 }, trace });
-    completed(dispatch);
+    modelUsage(dispatch, { costUsd: 0.05 });
+    modelUsage(dispatch, { costUsd: 0.10 });
+    modelUsage(dispatch, { usage: { input: 100, output: 50, cacheRead: 200, cacheWrite: 30, total: 380 } });
+    runCompleted(dispatch);
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
@@ -418,10 +370,10 @@ describe("side-channel attrs on Turn", () => {
 
   it("records run.attempt / message_received span events and context.assembled attrs", async () => {
     const { dispatch, finish } = await setupTurn();
-    dispatch.diagnostic({ type: "context.assembled", ts: 2, runId: "r", contextTokenBudget: 200000, messageCount: 12, historyTextChars: 5000, promptChars: 200, trace });
-    dispatch.diagnostic({ type: "run.attempt", ts: 3, runId: "r", attempt: 2, trace });
+    dispatch.diagnostic({ type: "context.assembled", ts: 2, runId: "r", contextTokenBudget: 200000, messageCount: 12, historyTextChars: 5000, promptChars: 200, trace: TRACE });
+    dispatch.diagnostic({ type: "run.attempt", ts: 3, runId: "r", attempt: 2, trace: TRACE });
     dispatch.hook("message_received", { runId: "r", from: "user@example.com", content: "hello" }, { channelId: "telegram" });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
@@ -441,7 +393,7 @@ describe("side-channel attrs on Turn", () => {
   it("agent_end stamps success/duration as attributes (not a duplicate timeline event)", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.hook("agent_end", { runId: "r", success: true, durationMs: 1200, messages: [] });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
@@ -459,19 +411,15 @@ describe("concurrent runs", () => {
     // boundary in the handlers must let both runs' SDK constructions
     // succeed; without it the second startTurn would throw "X is already
     // active in this async chain."
-    dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-A", sessionKey: "s-A",
-      trace: { traceId: "ta", spanId: "spa" } });
-    dispatch.diagnostic({ type: "run.started", ts: 1010, runId: "r-B", sessionKey: "s-B",
-      trace: { traceId: "tb", spanId: "spb" } });
+    runStarted(dispatch, { runId: "r-A", sessionKey: "s-A", trace: { traceId: "ta", spanId: "spa" } });
+    runStarted(dispatch, { runId: "r-B", sessionKey: "s-B", trace: { traceId: "tb", spanId: "spb" } });
     expect(plugin.registries.turns.has("r-A")).toBe(true);
     expect(plugin.registries.turns.has("r-B")).toBe(true);
 
     dispatch.hook("model_call_started", { runId: "r-A", callId: "c-A" });
     dispatch.hook("model_call_started", { runId: "r-B", callId: "c-B" });
-    dispatch.diagnostic({ type: "model.call.started", ts: 1100, runId: "r-A", callId: "c-A",
-      model: "gpt-4o", trace: { traceId: "ta", spanId: "csa", parentSpanId: "spa" } });
-    dispatch.diagnostic({ type: "model.call.started", ts: 1110, runId: "r-B", callId: "c-B",
-      model: "gpt-4o", trace: { traceId: "tb", spanId: "csb", parentSpanId: "spb" } });
+    modelCallStarted(dispatch, { runId: "r-A", callId: "c-A", spanId: "csa", parentSpanId: "spa", traceId: "ta" });
+    modelCallStarted(dispatch, { runId: "r-B", callId: "c-B", spanId: "csb", parentSpanId: "spb", traceId: "tb" });
     expect(plugin.registries.calls.has("c-A")).toBe(true);
     expect(plugin.registries.calls.has("c-B")).toBe(true);
 
@@ -479,15 +427,11 @@ describe("concurrent runs", () => {
     dispatch.hook("llm_input", { runId: "r-B", prompt: "from B" });
     dispatch.hook("llm_output", { runId: "r-A", assistantTexts: ["A answered"], usage: { input: 1, output: 1 } });
     dispatch.hook("llm_output", { runId: "r-B", assistantTexts: ["B answered"], usage: { input: 2, output: 2 } });
-    dispatch.diagnostic({ type: "model.call.completed", ts: 1200, runId: "r-A", callId: "c-A",
-      trace: { traceId: "ta", spanId: "csa" } });
-    dispatch.diagnostic({ type: "model.call.completed", ts: 1210, runId: "r-B", callId: "c-B",
-      trace: { traceId: "tb", spanId: "csb" } });
+    modelCallCompleted(dispatch, { runId: "r-A", callId: "c-A", spanId: "csa", traceId: "ta" });
+    modelCallCompleted(dispatch, { runId: "r-B", callId: "c-B", spanId: "csb", traceId: "tb" });
 
-    dispatch.diagnostic({ type: "run.completed", ts: 1500, runId: "r-A", sessionKey: "s-A",
-      trace: { traceId: "ta", spanId: "spa" }, outcome: "completed" });
-    dispatch.diagnostic({ type: "run.completed", ts: 1510, runId: "r-B", sessionKey: "s-B",
-      trace: { traceId: "tb", spanId: "spb" }, outcome: "completed" });
+    runCompleted(dispatch, { runId: "r-A", sessionKey: "s-A", trace: { traceId: "ta", spanId: "spa" } });
+    runCompleted(dispatch, { runId: "r-B", sessionKey: "s-B", trace: { traceId: "tb", spanId: "spb" } });
     await finish();
 
     const spans = exporter.getFinishedSpans();
@@ -509,9 +453,9 @@ describe("hot-reload / lifecycle", () => {
   it("start() called twice without an intervening stop() drops accumulated per-run state from the previous start", async () => {
     const { plugin, hookState, dispatch } = await bootPlugin();
     // Open some state under the first start().
-    started(dispatch, "r-1");
+    runStarted(dispatch, { runId: "r-1" });
     dispatch.hook("session_start", { sessionKey: "s" });
-    dispatch.diagnostic({ type: "model.usage", ts: 1100, runId: "r-1", costUsd: 0.42, trace });
+    modelUsage(dispatch, { runId: "r-1", costUsd: 0.42 });
     expect(plugin.registries.turns.size).toBeGreaterThan(0);
 
     // Second start() with no stop() in between — simulates plugin
@@ -543,7 +487,7 @@ describe("subagent and compaction", () => {
     dispatch.hook("subagent_ended", { runId: "sub-r", outcome: "ok" });
     dispatch.hook("subagent_spawned", { runId: "sub-r2", agentId: "broken", childSessionKey: "sub-s2", mode: "run" }, { runId: "r" });
     dispatch.hook("subagent_ended", { runId: "sub-r2", outcome: "killed" });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const spans = exporter.getFinishedSpans();
     const researcher = spans.find(s => s.attributes["gen_ai.agent.name"] === "researcher");
@@ -567,7 +511,7 @@ describe("subagent and compaction", () => {
     const { plugin, dispatch, finish } = await setupTurn();
     dispatch.hook("subagent_spawned", { runId: "sub-orphan", agentId: "orphan", childSessionKey: "ck", mode: "run" }, { runId: "missing" });
     expect(plugin.registries.subagents.has("sub-orphan")).toBe(false);
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
   });
 
@@ -575,7 +519,7 @@ describe("subagent and compaction", () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.hook("before_compaction", { messageCount: 50, tokenCount: 100000, compactingCount: 40 }, { runId: "r" });
     dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000 }, { runId: "r" });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const ev = compactedEvent();
     assert(ev);
@@ -587,7 +531,7 @@ describe("subagent and compaction", () => {
   it("infers items_before from after_compaction.compactedCount when before_compaction never fired", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000, compactedCount: 30 }, { runId: "r" });
-    completed(dispatch);
+    runCompleted(dispatch);
     await finish();
     const ev = compactedEvent();
     assert(ev);
