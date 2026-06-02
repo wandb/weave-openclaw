@@ -58,6 +58,14 @@ const started = (d: any, runId = "r", sessionKey = "s") =>
 const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
   d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
 
+// Boot a running plugin and open the default "r" Turn (the start of every per-run
+// suite). Tests close it with `completed(dispatch)` + `await finish()`.
+async function setupTurn(extraConfig: Record<string, unknown> = {}) {
+  const ctx = await bootPlugin(extraConfig);
+  started(ctx.dispatch);
+  return ctx;
+}
+
 function makeFakeApi(plugin: any) {
   return {
     hook(name: string, event: any, ctx?: any) {
@@ -227,12 +235,6 @@ describe("turn lifecycle", () => {
 });
 
 describe("llm two-signal close", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin();
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("buffers llm_input before model_call_started, promotes it, and closes the chat span with model + usage", async () => {
     const { dispatch, hookState, finish } = await setupTurn();
     dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "be helpful" });
@@ -323,12 +325,6 @@ describe("closeRunChatSpans positional attribution", () => {
 });
 
 describe("tool lifecycle", () => {
-  async function setupTurn(captureContent = true) {
-    const ctx = await bootPlugin({ captureContent });
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
     const { dispatch, finish } = await setupTurn();
     // completed, with captured args + result
@@ -361,7 +357,7 @@ describe("tool lifecycle", () => {
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
-    const { dispatch, finish } = await setupTurn(false);
+    const { dispatch, finish } = await setupTurn({ captureContent: false });
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
     dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
     dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
@@ -403,12 +399,6 @@ describe("tool lifecycle", () => {
   });
 });
 describe("side-channel attrs on Turn", () => {
-  async function setupTurn() {
-    const ctx = await bootPlugin({ captureContent: true });
-    started(ctx.dispatch);
-    return ctx;
-  }
-
   it("accumulates cost and stamps usage totals from model.usage", async () => {
     const { dispatch, finish } = await setupTurn();
     dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace });
@@ -538,5 +528,71 @@ describe("hot-reload / lifecycle", () => {
     expect(hookState.assistantOutputByRun.size).toBe(0);
 
     await plugin.service.stop({ logger: makeLogger() } as any);
+  });
+});
+
+describe("subagent and compaction", () => {
+  const compactedEvent = () =>
+    exporter.getFinishedSpans()
+      .find(s => s.name === "invoke_agent")
+      ?.events.find(e => e.name === "context_compacted");
+
+  it("opens a SubAgent under the requester's Turn with spawned-event attrs; non-ok ends ERROR", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", { runId: "sub-r", agentId: "researcher", label: "search-agent", childSessionKey: "sub-s", mode: "run" }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r", outcome: "ok" });
+    dispatch.hook("subagent_spawned", { runId: "sub-r2", agentId: "broken", childSessionKey: "sub-s2", mode: "run" }, { runId: "r" });
+    dispatch.hook("subagent_ended", { runId: "sub-r2", outcome: "killed" });
+    completed(dispatch);
+    await finish();
+    const spans = exporter.getFinishedSpans();
+    const researcher = spans.find(s => s.attributes["gen_ai.agent.name"] === "researcher");
+    const broken = spans.find(s => s.attributes["gen_ai.agent.name"] === "broken");
+    assert(researcher);
+    assert(broken);
+    expect(broken.status.code).toBe(2);
+    // The requester Turn is the invoke_agent span that recorded the spawn events;
+    // sub-agent spans are also invoke_agent but carry the sub's gen_ai.agent.name.
+    const requester = spans.find(s => s.name === "invoke_agent" && s.events.some(e => e.name === "subagent_spawned"));
+    assert(requester);
+    const ev = requester.events.find(e => e.name === "subagent_spawned" && e.attributes?.["weave.agent.id"] === "researcher");
+    assert(ev);
+    assert(ev.attributes);
+    expect(ev.attributes["weave.subagent.mode"]).toBe("run");
+    expect(ev.attributes["weave.agent.description"]).toBe("search-agent");
+    expect(ev.attributes["gen_ai.conversation.id"]).toBe("sub-s");
+  });
+
+  it("does not open a subagent when no requester turn exists", async () => {
+    const { plugin, dispatch, finish } = await setupTurn();
+    dispatch.hook("subagent_spawned", { runId: "sub-orphan", agentId: "orphan", childSessionKey: "ck", mode: "run" }, { runId: "missing" });
+    expect(plugin.registries.subagents.has("sub-orphan")).toBe(false);
+    completed(dispatch);
+    await finish();
+  });
+
+  it("emits context_compacted with items_before from before_compaction", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("before_compaction", { messageCount: 50, tokenCount: 100000, compactingCount: 40 }, { runId: "r" });
+    dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000 }, { runId: "r" });
+    completed(dispatch);
+    await finish();
+    const ev = compactedEvent();
+    assert(ev);
+    assert(ev.attributes);
+    expect(ev.attributes["weave.compaction.items_before"]).toBe(50);
+    expect(ev.attributes["weave.compaction.items_after"]).toBe(10);
+  });
+
+  it("infers items_before from after_compaction.compactedCount when before_compaction never fired", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("after_compaction", { messageCount: 10, tokenCount: 20000, compactedCount: 30 }, { runId: "r" });
+    completed(dispatch);
+    await finish();
+    const ev = compactedEvent();
+    assert(ev);
+    assert(ev.attributes);
+    expect(ev.attributes["weave.compaction.items_before"]).toBe(40);
+    expect(ev.attributes["weave.compaction.items_after"]).toBe(10);
   });
 });
