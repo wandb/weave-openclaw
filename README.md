@@ -5,18 +5,17 @@
 [![license](https://img.shields.io/npm/l/weave-openclaw.svg)](./LICENSE)
 [![node](https://img.shields.io/node/v/weave-openclaw.svg)](./package.json)
 
-OpenClaw third-party plugin that exports agent diagnostic events as
-OpenTelemetry GenAI spans to [W&B Weave](https://wandb.ai/site/weave),
-via the [Weave Node SDK](https://github.com/wandb/weave/tree/master/sdks/node).
-Traces land in the **Agents** tab of your Weave project: per-agent
-version history, multi-turn conversation chat view, tool calls, cost,
-search, and filtering.
+This is an OpenClaw plugin that sends a record of what your agents do to
+[W&B Weave](https://wandb.ai/site/weave), so you can see and search it all
+in one dashboard. Once it's running, every agent run, model call, and tool
+call shows up in the **Agents** tab of your Weave project, along with the
+full conversation, token usage, and cost.
 
 ## Requirements
 
 - Node.js >= 22
-- OpenClaw >= 2026.4.25 (plugin API)
-- A W&B account and project. Sign up at [wandb.ai](https://wandb.ai)
+- OpenClaw >= 2026.4.25
+- A free W&B account and a project. Sign up at [wandb.ai](https://wandb.ai)
   if you don't have one.
 
 ## Install
@@ -25,23 +24,22 @@ search, and filtering.
 pnpm add weave-openclaw
 ```
 
-The plugin is loaded by the OpenClaw gateway through its config; you
-do not import it from application code.
+You don't import this in your own code. The OpenClaw gateway loads it from
+its config, which you set up next.
 
 ## Quickstart
 
-1. Grab a W&B API key at [wandb.ai/authorize](https://wandb.ai/authorize)
+1. Get a W&B API key at [wandb.ai/authorize](https://wandb.ai/authorize)
    and export it:
 
    ```bash
    export WANDB_API_KEY=<your-key>
    ```
 
-2. Add the plugin to your OpenClaw gateway config (default
-   `~/.openclaw/openclaw.json`, JSON5 so comments and trailing commas
-   are allowed; run `openclaw onboard` to scaffold one):
+2. Add the plugin to your OpenClaw gateway config (by default
+   `~/.openclaw/openclaw.json`; run `openclaw onboard` to create one):
 
-   ```json5
+   ```js
    {
      diagnostics: { enabled: true },
      plugins: {
@@ -57,44 +55,54 @@ do not import it from application code.
    }
    ```
 
-3. Restart the gateway. Run `/weave status` in any OpenClaw chat
-   surface to confirm the plugin is `running`. Traces will appear at
-   `wandb.ai/<entity>/<project>`.
+3. Restart the gateway. In any OpenClaw chat, run `/weave status` to confirm
+   the plugin says `running`. Your traces will appear at
+   `wandb.ai/<entity>/<project>/weave/agents`.
 
-Two flags above are easy to miss:
+Two settings above are easy to miss, and your traces won't be complete
+without them:
 
-- `diagnostics.enabled: true`: without it OpenClaw does not emit the
-  diagnostic events this plugin consumes.
-- `hooks.allowConversationAccess: true`: without it OpenClaw blocks
-  the content-bearing hooks (`llm_input`, `llm_output`, `agent_end`)
-  and Weave spans land without input/output text or tool args/results.
+- `diagnostics.enabled: true`: without this, OpenClaw doesn't report what
+  your agents are doing, so there's nothing for the plugin to send.
+- `hooks.allowConversationAccess: true`: without this, OpenClaw hides the
+  message text, so your traces arrive without the conversation, tool
+  inputs, or tool results.
 
-## Configuration reference
+## Configuration
 
-```json5
+Only `entity` and `project` are required. Everything else has a sensible
+default.
+
+```js
 {
   plugins: {
     entries: {
       weave: {
         enabled: true,
         config: {
-          entity: "your-team",
-          project: "your-project",
-          // Reads WANDB_API_KEY from env if apiKey is omitted.
-          // SecretRef supports source: "env" or "file":
-          //   { source: "env",  provider: "default", id: "WANDB_API_KEY" }
-          //   { source: "file", provider: "default", id: "/run/secrets/wandb" }
-          // Plain string is supported but discouraged.
+          entity: "your-team",        // your W&B team or username
+          project: "your-project",    // your W&B project name
+
+          // Leave apiKey out to use the WANDB_API_KEY environment variable.
+          // To read the key from a file instead:
+          //   apiKey: { source: "file", provider: "default", id: "/run/secrets/wandb" }
+          // A plain key string works too, but keeping secrets out of config is safer:
+          //   apiKey: "your-wandb-api-key"
           apiKey: { source: "env", provider: "default", id: "WANDB_API_KEY" },
-          serviceName: "openclaw-agent",
-          // Optional, improves Agents tab grouping.
+
+          serviceName: "openclaw-agent",   // shown in /weave status
+          // These help group and label your agents in the dashboard.
           agentName: "my-agent",
           agentVersion: "v1.0",
           agentDescription: "What my agent does.",
-          // ON by default. Set to false for a hard off (compliance or
-          // retention policy). The plugin does not redact captured
-          // strings; scrub upstream if needed.
+
+          // On by default. Set to false to stop recording the actual message
+          // text (for example, to meet a privacy or retention policy). The
+          // plugin records text as-is and does not hide sensitive values, so
+          // remove them beforehand if you need to.
           captureContent: true,
+
+          // How often (in milliseconds) traces are sent.
           flushIntervalMs: 5000,
         },
         hooks: { allowConversationAccess: true },
@@ -104,87 +112,78 @@ Two flags above are easy to miss:
 }
 ```
 
-### Auth resolution order
+### Where the plugin finds your API key
 
-1. `apiKey` SecretRef (`source: "env"` or `source: "file"`)
-2. `apiKey` literal string
-3. `process.env.WANDB_API_KEY`
-4. `~/.netrc` entry for the Weave host (populated by `wandb login`)
+It checks these in order and uses the first one it finds:
 
-Endpoint and auth are delegated to the Weave Node SDK. It reads
-`WANDB_BASE_URL` (default `https://api.wandb.ai`; dedicated installs
-set this to their install host) and `WF_TRACE_SERVER_URL` (full
-trace-server URL override) the same way the Weave Python and Node
-SDKs do.
+1. The `apiKey` you set in config (from an environment variable or a file)
+2. A plain `apiKey` string in config
+3. The `WANDB_API_KEY` environment variable
+4. Your `~/.netrc`, which `wandb login` fills in for you
 
-## What gets captured
+You can also put `WANDB_API_KEY=...` in `~/.openclaw/.env`. OpenClaw loads
+that file into the gateway's environment at startup, so it feeds option 3
+above. A key already set in your shell takes precedence.
 
-Per the [OTel GenAI semantic conventions](https://opentelemetry.io/docs/specs/semconv/gen-ai/):
+Most people don't need to change where traces are sent. If you're on a
+dedicated or self-hosted W&B install, set the `WANDB_BASE_URL` environment
+variable to your install's address; the plugin and the `wandb` command-line
+tools read it the same way.
 
-| Span | Emitted on | Key attributes |
-|---|---|---|
-| `invoke_agent <agent>` | per agent run | `gen_ai.agent.name`, `gen_ai.conversation.id`, cumulative cost and token usage |
-| `chat <model>` | per model call | `gen_ai.request.model`, `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` |
-| `execute_tool <tool>` | per tool execution | `gen_ai.tool.name`, `gen_ai.tool.call.id` |
+## What gets recorded
 
-When `captureContent` is on (default), input/output messages, tool
-arguments, and tool results are also emitted following the
-`gen_ai.input.messages` / `gen_ai.output.messages` payload shape.
-Subagents, compaction events, loop detection, retry attempts, and
-context sizing are stamped as additional attributes and span events.
+When everything is connected, each trace includes:
 
-## Viewing your traces in Weave
+- Every **agent run**, with its name and a running total of cost and tokens
+- Every **model call**, with the model name and how many tokens went in and out
+- Every **tool call**, with the tool name and its result
 
-After restarting the gateway, drive an agent through OpenClaw. Within
-a few seconds (controlled by `flushIntervalMs`) traces land at:
+With content recording on (the default), the full input and output messages
+and the tool inputs and results are saved too. Extra details like subagents,
+retries, and context compaction are recorded as well.
+
+## Viewing your traces
+
+After you restart the gateway, run an agent through OpenClaw. Within a few
+seconds (set by `flushIntervalMs`) your traces appear at:
 
 ```
-https://wandb.ai/<entity>/<project>
+https://wandb.ai/<entity>/<project>/weave/agents
 ```
 
-Open the **Agents** tab in the left nav for the multi-turn chat view
-and per-agent version grouping; open **Traces** for the raw span
-tree. Full Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai/).
+Open the **Agents** tab in the left nav for the conversation view and
+per-agent grouping, or the **Traces** tab for the full step-by-step view.
+The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai/).
 
 ## Troubleshooting
 
-### Plugin loaded but no spans show up
+### The plugin is loaded but nothing shows up
 
-1. Run `/weave status`. If lifecycle is `disabled`, `config-error`,
-   or `not-started`, the plugin did not activate. Check the gateway
-   log for `weave: config.entity is required`, `weave: configuration
-   error`, or `[weave] incompatible plugin SDK`.
-2. Confirm `diagnostics.enabled: true` in the gateway config.
-3. Confirm entity/project match the URL slug of the Weave project
-   you're inspecting. `/weave status` prints `project=<entity>/<project>`.
-4. Confirm the auth source. `/weave status` prints `auth=...`. If it
-   says `WANDB_API_KEY env` but you set the key in a different env
-   var, the plugin is reading the wrong key.
+1. Run `/weave status`. If it doesn't say `running`, the plugin didn't
+   start. The usual causes are a missing `entity` or `project`, or an
+   out-of-date plugin. The gateway log says which.
+2. Make sure `diagnostics.enabled: true` is in your config.
+3. Make sure `entity` and `project` match the project you're looking at.
+   `/weave status` prints them as `project=<entity>/<project>`.
+4. Check which key is being used. `/weave status` prints `auth=...`. If it
+   points at the wrong place, fix the key.
 
-### Spans land but input/output text is empty
+### Traces show up but the messages are blank
 
-Look in the gateway log for:
+This means OpenClaw is hiding the conversation text. Set
+`hooks.allowConversationAccess: true` in your config (under
+`plugins.entries.weave`) and restart the gateway. The trace structure, cost,
+and token counts come through either way; only the message text needs this
+setting. If you check the gateway log, you'll see lines about hooks being
+"blocked."
 
-```
-[plugins] typed hook "llm_input"  blocked because non-bundled plugins must set
-                                  plugins.entries.weave.hooks.allowConversationAccess=true
-[plugins] typed hook "llm_output" blocked ...
-[plugins] typed hook "agent_end"  blocked ...
-```
+### Traces aren't reaching W&B
 
-OpenClaw gates content-bearing hooks behind an operator opt-in. Set
-`plugins.entries.weave.hooks.allowConversationAccess: true` in your
-config and restart the gateway. Span structure and cost/usage data
-come through diagnostic events, not hooks, so those keep working
-even without the gate flipped.
-
-### Export failures
-
-| Symptom | Most likely cause | Fix |
+| What you see | Likely cause | What to do |
 |---|---|---|
-| 401 / 403 from `trace.wandb.ai` | Invalid or scope-limited API key | Verify the key is current and the team owns the entity/project. `wandb login` refreshes `~/.netrc`. |
-| 404 from the agents endpoint | Wrong base or trace-server URL | For dedicated installs, set `WANDB_BASE_URL` to your install host. For self-managed or proxy, set `WF_TRACE_SERVER_URL` to the trace-server URL. |
-| Connection refused / DNS error | DNS, proxy, or firewall | Confirm the gateway host can reach `trace.wandb.ai` (cloud) or your install host (dedicated) on 443. |
+| A `401` or `403` error | The API key is wrong or doesn't have access | Check that the key is current and that your team owns the entity and project. `wandb login` refreshes it. |
+| A `404` error | Wrong server address | On a dedicated or self-hosted install, set `WANDB_BASE_URL` to your install's address. |
+| Connection refused or DNS error | Network, proxy, or firewall | Make sure the machine running the gateway can reach W&B (or your install) on port 443. |
 
 ## License
 
