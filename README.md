@@ -63,17 +63,12 @@ it in your own code; the gateway loads it from the config you set up next.
    the plugin says `running`. Your traces will appear at
    `wandb.ai/<entity>/<project>/weave/agents`.
 
-Two settings above are easy to miss, and your traces won't be complete
-without them:
-
-- `diagnostics.enabled: true`: without this, OpenClaw doesn't report what
-  your agents are doing, so there's nothing for the plugin to send.
-- `hooks.allowConversationAccess: true`: OpenClaw treats prompts and
-  replies as sensitive and won't hand them to a third-party plugin unless
-  you opt in here. Without it, your model-call spans lose the prompts,
-  responses, and per-call token counts, and your tool spans lose their
-  inputs and results. Trace structure and run-level cost and token
-  totals still come through.
+`hooks.allowConversationAccess: true` is easy to miss. Without it, OpenClaw
+won't share prompts and replies with a third-party plugin, so model-call
+spans arrive without prompts, responses, or per-call token counts. Trace
+structure, tool calls, and run-level cost and token totals still come
+through. (`diagnostics.enabled` is on by default; setting it to `false`
+disables tracing.)
 
 ## Configuration
 
@@ -169,23 +164,22 @@ The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai
 1. Run `/weave status`. If it doesn't say `running`, the plugin didn't
    start. The usual causes are a missing `entity` or `project`, or an
    out-of-date plugin. The gateway log says which.
-2. Make sure `diagnostics.enabled: true` is in your config.
+2. Diagnostics is on by default; check you haven't set
+   `diagnostics.enabled: false`.
 3. Make sure `entity` and `project` match the project you're looking at.
    `/weave status` prints them as `project=<entity>/<project>`.
 4. Check which key is being used. `/weave status` prints `auth=...`. If it
    points at the wrong place, fix the key.
-5. If runs appear but the model calls, tool calls, or messages are empty,
-   you likely need `hooks.allowConversationAccess: true` (see below).
+5. If runs appear but model calls or messages are empty, set
+   `hooks.allowConversationAccess: true` (see below).
 
 ### Traces show up but the messages are blank
 
-This means OpenClaw is hiding the conversation text. Set
-`hooks.allowConversationAccess: true` in your config (under
-`plugins.entries.weave`) and restart the gateway. The span structure and
-run-level cost and token totals come through either way; the prompts, model
-responses, per-call token counts, and tool inputs and results need this
-setting. If you check the gateway log, you'll see lines about hooks being
-"blocked."
+OpenClaw is hiding the conversation text. Set
+`hooks.allowConversationAccess: true` (under `plugins.entries.weave`) and
+restart the gateway. Structure, tool I/O, and run-level totals come through
+regardless; only prompts, responses, and per-call token counts need this
+setting. The gateway log shows the blocked hooks.
 
 ### Traces aren't reaching W&B
 
