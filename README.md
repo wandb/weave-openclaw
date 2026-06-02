@@ -20,12 +20,16 @@ full conversation, token usage, and cost.
 
 ## Install
 
+Install it with OpenClaw's plugin manager. This works from any directory,
+so you don't have to be inside a particular project:
+
 ```bash
-pnpm add weave-openclaw
+openclaw plugins install weave-openclaw
 ```
 
-You don't import this in your own code. The OpenClaw gateway loads it from
-its config, which you set up next.
+Use the full name `weave-openclaw`; `weave` on its own is the W&B SDK, not
+this plugin. This registers the plugin with your gateway. You don't import
+it in your own code; the gateway loads it from the config you set up next.
 
 ## Quickstart
 
@@ -59,14 +63,12 @@ its config, which you set up next.
    the plugin says `running`. Your traces will appear at
    `wandb.ai/<entity>/<project>/weave/agents`.
 
-Two settings above are easy to miss, and your traces won't be complete
-without them:
-
-- `diagnostics.enabled: true`: without this, OpenClaw doesn't report what
-  your agents are doing, so there's nothing for the plugin to send.
-- `hooks.allowConversationAccess: true`: without this, OpenClaw hides the
-  message text, so your traces arrive without the conversation, tool
-  inputs, or tool results.
+`hooks.allowConversationAccess: true` is easy to miss. Without it, OpenClaw
+won't share prompts and replies with a third-party plugin, so model-call
+spans arrive without prompts, responses, or per-call token counts. Trace
+structure, tool calls, and run-level cost and token totals still come
+through. (`diagnostics.enabled` is on by default; setting it to `false`
+disables tracing.)
 
 ## Configuration
 
@@ -103,7 +105,7 @@ default.
           captureContent: true,
 
           // How often (in milliseconds) traces are sent.
-          flushIntervalMs: 5000,
+          flushIntervalMs: 1000,
         },
         hooks: { allowConversationAccess: true },
       },
@@ -162,20 +164,22 @@ The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai
 1. Run `/weave status`. If it doesn't say `running`, the plugin didn't
    start. The usual causes are a missing `entity` or `project`, or an
    out-of-date plugin. The gateway log says which.
-2. Make sure `diagnostics.enabled: true` is in your config.
+2. Diagnostics is on by default; check you haven't set
+   `diagnostics.enabled: false`.
 3. Make sure `entity` and `project` match the project you're looking at.
    `/weave status` prints them as `project=<entity>/<project>`.
 4. Check which key is being used. `/weave status` prints `auth=...`. If it
    points at the wrong place, fix the key.
+5. If runs appear but model calls or messages are empty, set
+   `hooks.allowConversationAccess: true` (see below).
 
 ### Traces show up but the messages are blank
 
-This means OpenClaw is hiding the conversation text. Set
-`hooks.allowConversationAccess: true` in your config (under
-`plugins.entries.weave`) and restart the gateway. The trace structure, cost,
-and token counts come through either way; only the message text needs this
-setting. If you check the gateway log, you'll see lines about hooks being
-"blocked."
+OpenClaw is hiding the conversation text. Set
+`hooks.allowConversationAccess: true` (under `plugins.entries.weave`) and
+restart the gateway. Structure, tool I/O, and run-level totals come through
+regardless; only prompts, responses, and per-call token counts need this
+setting. The gateway log shows the blocked hooks.
 
 ### Traces aren't reaching W&B
 
@@ -184,7 +188,3 @@ setting. If you check the gateway log, you'll see lines about hooks being
 | A `401` or `403` error | The API key is wrong or doesn't have access | Check that the key is current and that your team owns the entity and project. `wandb login` refreshes it. |
 | A `404` error | Wrong server address | On a dedicated or self-hosted install, set `WANDB_BASE_URL` to your install's address. |
 | Connection refused or DNS error | Network, proxy, or firewall | Make sure the machine running the gateway can reach W&B (or your install) on port 443. |
-
-## License
-
-MIT, see [LICENSE](./LICENSE).

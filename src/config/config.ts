@@ -7,7 +7,7 @@ import { resolveConfiguredSecretInputString } from "openclaw/plugin-sdk/secret-i
 import type { SecretRef } from "openclaw/plugin-sdk/secret-ref-runtime";
 import { PACKAGE_VERSION } from "./version.js";
 
-const DEFAULT_FLUSH_INTERVAL_MS = 5000;
+const DEFAULT_FLUSH_INTERVAL_MS = 1000;
 const MIN_FLUSH_INTERVAL_MS = 1000;
 const DEFAULT_SERVICE_NAME = "openclaw-agent";
 // Fallback agent name for Sessions and Turns when config sets no agentName.
