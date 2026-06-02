@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, afterEach, vi, assert } from "vitest"
 import { InMemorySpanExporter, SimpleSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { init as weaveInit, startTurn } from "weave";
 import { createWeaveHookState } from "./state/hook-state.js";
+import { bootPlugin, makeFakeApi, makeLogger } from "./test/helpers.js";
 
 // Stub weave.login so tests don't hit the live server or write ~/.netrc.
 vi.mock("weave", async (importOriginal) => {
@@ -28,47 +29,12 @@ beforeEach(async () => {
   exporter.reset();
 });
 
-function makeLogger() {
-  return { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
-}
-
-// Start a running plugin and a fake event dispatcher for the turn-lifecycle suite.
-async function bootPlugin(extraConfig: Record<string, unknown> = {}) {
-  const { createWeavePlugin } = await import("./plugin.js");
-  const hookState = createWeaveHookState();
-  const logger = makeLogger();
-  const plugin = createWeavePlugin({
-    pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", serviceName: "openclaw-agent", ...extraConfig },
-    hookState,
-  });
-  await plugin.service.start({ logger, config: {} } as any);
-  return {
-    plugin,
-    hookState,
-    logger,
-    dispatch: makeFakeApi(plugin),
-    finish: () => plugin.service.stop({ logger } as any),
-  };
-}
-
 // Shared run-lifecycle dispatch for the diagnostic suites below.
 const trace = { traceId: "t", spanId: "sp" };
 const started = (d: any, runId = "r", sessionKey = "s") =>
   d.diagnostic({ type: "run.started", ts: 1000, runId, sessionKey, trace });
 const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
   d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
-
-function makeFakeApi(plugin: any) {
-  return {
-    hook(name: string, event: any, ctx?: any) {
-      const handler = plugin.handlers.hook[name];
-      if (handler) handler(event, ctx ?? {});
-    },
-    diagnostic(event: any) {
-      plugin.handlers.diagnostic(event, { trusted: true });
-    },
-  };
-}
 
 describe("createWeavePlugin lifecycle", () => {
   afterEach(() => {
