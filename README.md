@@ -20,12 +20,16 @@ full conversation, token usage, and cost.
 
 ## Install
 
+Install it with OpenClaw's plugin manager. This works from any directory,
+so you don't have to be inside a particular project:
+
 ```bash
-pnpm add weave-openclaw
+openclaw plugins install weave-openclaw
 ```
 
-You don't import this in your own code. The OpenClaw gateway loads it from
-its config, which you set up next.
+Use the full name `weave-openclaw`; `weave` on its own is the W&B SDK, not
+this plugin. This registers the plugin with your gateway. You don't import
+it in your own code; the gateway loads it from the config you set up next.
 
 ## Quickstart
 
@@ -64,9 +68,10 @@ without them:
 
 - `diagnostics.enabled: true`: without this, OpenClaw doesn't report what
   your agents are doing, so there's nothing for the plugin to send.
-- `hooks.allowConversationAccess: true`: without this, OpenClaw hides the
-  message text, so your traces arrive without the conversation, tool
-  inputs, or tool results.
+- `hooks.allowConversationAccess: true`: without this, OpenClaw withholds
+  the conversation, so your model-call and tool spans arrive empty: no
+  prompts, responses, per-call token counts, or tool inputs and results.
+  Only run-level cost and token totals still come through.
 
 ## Configuration
 
@@ -172,10 +177,11 @@ The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai
 
 This means OpenClaw is hiding the conversation text. Set
 `hooks.allowConversationAccess: true` in your config (under
-`plugins.entries.weave`) and restart the gateway. The trace structure, cost,
-and token counts come through either way; only the message text needs this
-setting. If you check the gateway log, you'll see lines about hooks being
-"blocked."
+`plugins.entries.weave`) and restart the gateway. The span structure and
+run-level cost and token totals come through either way, but the
+conversation, per-call token counts, tool inputs, and tool results all need
+this setting. If you check the gateway log, you'll see lines about hooks
+being "blocked."
 
 ### Traces aren't reaching W&B
 

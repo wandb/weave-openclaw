@@ -161,7 +161,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
       const wandbBase = readWandbBaseUrl();
       const uiUrl =
         !wandbBase || wandbBase === WANDB_CLOUD_API_BASE_URL
-          ? `${WANDB_CLOUD_UI_BASE_URL}/${resolved.projectId}/weave`
+          ? `${WANDB_CLOUD_UI_BASE_URL}/${resolved.projectId}/weave/agents`
           : undefined;
       snap.config = {
         projectId: resolved.projectId,
