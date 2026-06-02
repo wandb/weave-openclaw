@@ -42,7 +42,7 @@
     "@types/node": "^22.10.0",
     "openclaw": ">=2026.4.25",
     "typescript": "^5.6.0",
-    "vitest": "^2.1.0"
+    "vitest": "^4.1.0"
   },
   "scripts": {
     "build": "tsc -p .",
