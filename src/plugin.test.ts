@@ -58,14 +58,6 @@ const started = (d: any, runId = "r", sessionKey = "s") =>
 const completed = (d: any, runId = "r", outcome = "completed", sessionKey = "s") =>
   d.diagnostic({ type: "run.completed", ts: 2000, runId, sessionKey, trace, outcome });
 
-// Boot the plugin and open the default "r" Turn — the starting point for every
-// per-run suite below. Tests close the Turn with `completed(dispatch)` + `await finish()`.
-async function setupTurn(extraConfig: Record<string, unknown> = {}) {
-  const ctx = await bootPlugin(extraConfig);
-  started(ctx.dispatch);
-  return ctx;
-}
-
 function makeFakeApi(plugin: any) {
   return {
     hook(name: string, event: any, ctx?: any) {
@@ -331,8 +323,14 @@ describe("closeRunChatSpans positional attribution", () => {
 });
 
 describe("tool lifecycle", () => {
+  async function setupTurn(captureContent = true) {
+    const ctx = await bootPlugin({ captureContent });
+    started(ctx.dispatch);
+    return ctx;
+  }
+
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: true });
+    const { dispatch, finish } = await setupTurn();
     // completed, with captured args + result
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-1", toolName: "search", params: { q: "weave" } });
     dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-1", toolName: "search", trace: { traceId: "t", spanId: "tc1", parentSpanId: "sp" } });
@@ -348,18 +346,22 @@ describe("tool lifecycle", () => {
     await finish();
     const byId = (id: string) => exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === id);
     const ok = byId("tc-1");
+    const errored = byId("tc-2");
+    const blocked = byId("tc-3");
     assert(ok);
+    assert(errored);
+    assert(blocked);
     expect(ok.name).toBe("execute_tool");
     expect(ok.attributes["gen_ai.tool.name"]).toBe("search");
     expect(ok.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
     expect(ok.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
-    expect(ok.status.code).not.toBe(2);
-    expect(byId("tc-2")?.status.code).toBe(2);
-    expect(byId("tc-3")?.status.code).toBe(2);
+    expect(ok.status.code).not.toBe(2); // completed tool is not an error
+    expect(errored.status.code).toBe(2);
+    expect(blocked.status.code).toBe(2);
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: false });
+    const { dispatch, finish } = await setupTurn(false);
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
     dispatch.diagnostic({ type: "tool.execution.started", ts: 1100, runId: "r", toolCallId: "tc-nc", toolName: "search", trace: { traceId: "t", spanId: "tcnc", parentSpanId: "sp" } });
     dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-nc", result: { secret: "shhh" } });
@@ -371,45 +373,68 @@ describe("tool lifecycle", () => {
     expect(span.attributes["gen_ai.tool.call.arguments"]).toBeUndefined();
     expect(span.attributes["gen_ai.tool.call.result"]).toBeUndefined();
   });
-});
 
-describe("side-channel attrs on Turn", () => {
-  const turnSpan = () => exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
-
-  it("accumulates cost and stamps usage totals from model.usage", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: true });
-    dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace });
-    dispatch.diagnostic({ type: "model.usage", ts: 2, runId: "r", costUsd: 0.10, trace });
-    dispatch.diagnostic({ type: "model.usage", ts: 3, runId: "r", usage: { input: 100, output: 50, cacheRead: 200, cacheWrite: 30, total: 380 }, trace });
+  it("records a tool.loop event on the Turn (resolved via sessionKey, which the event carries instead of runId)", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({
+      type: "tool.loop",
+      ts: 1200,
+      sessionKey: "s", // tool.loop omits runId; sessionKey maps back to the run's Turn
+      toolName: "search",
+      level: "warning",
+      action: "warn",
+      detector: "generic_repeat",
+      count: 3,
+      message: "repeated tool call",
+    });
     completed(dispatch);
     await finish();
-    const turn = turnSpan();
-    assert(turn);
-    expect(turn.attributes["weave.cost.usd"]).toBeCloseTo(0.15);
-    expect(turn.attributes["weave.usage.input_tokens"]).toBe(100);
-    expect(turn.attributes["weave.usage.output_tokens"]).toBe(50);
-    expect(turn.attributes["weave.usage.cache_read.input_tokens"]).toBe(200);
-    expect(turn.attributes["weave.usage.cache_creation.input_tokens"]).toBe(30);
-  });
-
-  it("records tool.loop / run.attempt / message_received span events and context.assembled attrs", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: true });
-    dispatch.diagnostic({ type: "tool.loop", ts: 1, runId: "r", toolName: "search", level: "warn", action: "abort", count: 3, message: "same args 3x", trace });
-    dispatch.diagnostic({ type: "context.assembled", ts: 2, runId: "r", contextTokenBudget: 200000, messageCount: 12, historyTextChars: 5000, promptChars: 200, trace });
-    dispatch.diagnostic({ type: "run.attempt", ts: 3, runId: "r", attempt: 2, trace });
-    dispatch.hook("message_received", { runId: "r", from: "user@example.com", content: "hello" }, { channelId: "telegram" });
-    completed(dispatch);
-    await finish();
-    const turn = turnSpan();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
     const loop = turn.events.find(e => e.name === "tool.loop");
     assert(loop);
     assert(loop.attributes);
     expect(loop.attributes["gen_ai.tool.name"]).toBe("search");
-    expect(loop.attributes["weave.loop.level"]).toBe("warn");
-    expect(loop.attributes["weave.loop.action"]).toBe("abort");
+    expect(loop.attributes["weave.loop.level"]).toBe("warning");
+    expect(loop.attributes["weave.loop.action"]).toBe("warn");
+    expect(loop.attributes["weave.loop.detector"]).toBe("generic_repeat");
     expect(loop.attributes["weave.loop.count"]).toBe(3);
-    expect(loop.attributes["weave.loop.message"]).toBe("same args 3x");
+    expect(loop.attributes["weave.loop.message"]).toBe("repeated tool call");
+  });
+});
+describe("side-channel attrs on Turn", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin({ captureContent: true });
+    started(ctx.dispatch);
+    return ctx;
+  }
+
+  it("accumulates cost and stamps usage totals from model.usage", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({ type: "model.usage", ts: 1, runId: "r", costUsd: 0.05, trace });
+    dispatch.diagnostic({ type: "model.usage", ts: 2, runId: "r", costUsd: 0.10, trace });
+    dispatch.diagnostic({ type: "model.usage", ts: 3, runId: "r", usage: { input: 100, output: 50, cacheRead: 200, cacheWrite: 30, total: 380 }, trace });
+    completed(dispatch);
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
+    expect(turn.attributes["weave.cost.usd"]).toBeCloseTo(0.15);
+    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(100);
+    expect(turn.attributes["gen_ai.usage.output_tokens"]).toBe(50);
+    expect(turn.attributes["gen_ai.usage.total_tokens"]).toBe(380);
+    expect(turn.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(200);
+    expect(turn.attributes["gen_ai.usage.cache_creation.input_tokens"]).toBe(30);
+  });
+
+  it("records run.attempt / message_received span events and context.assembled attrs", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.diagnostic({ type: "context.assembled", ts: 2, runId: "r", contextTokenBudget: 200000, messageCount: 12, historyTextChars: 5000, promptChars: 200, trace });
+    dispatch.diagnostic({ type: "run.attempt", ts: 3, runId: "r", attempt: 2, trace });
+    dispatch.hook("message_received", { runId: "r", from: "user@example.com", content: "hello" }, { channelId: "telegram" });
+    completed(dispatch);
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
     expect(turn.attributes["weave.context.budget_tokens"]).toBe(200000);
     expect(turn.attributes["weave.context.message_count"]).toBe(12);
     expect(turn.attributes["weave.context.history_text_chars"]).toBe(5000);
@@ -424,11 +449,11 @@ describe("side-channel attrs on Turn", () => {
   });
 
   it("agent_end stamps success/duration as attributes (not a duplicate timeline event)", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: true });
+    const { dispatch, finish } = await setupTurn();
     dispatch.hook("agent_end", { runId: "r", success: true, durationMs: 1200, messages: [] });
     completed(dispatch);
     await finish();
-    const turn = turnSpan();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
     expect(turn.events.find(e => e.name === "agent_end_summary")).toBeUndefined();
     expect(turn.attributes["weave.agent.success"]).toBe(true);
@@ -517,6 +542,12 @@ describe("hot-reload / lifecycle", () => {
 });
 
 describe("subagent and compaction", () => {
+  async function setupTurn() {
+    const ctx = await bootPlugin();
+    started(ctx.dispatch);
+    return ctx;
+  }
+
   const compactedEvent = () =>
     exporter.getFinishedSpans()
       .find(s => s.name === "invoke_agent")
