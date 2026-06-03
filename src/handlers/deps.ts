@@ -22,4 +22,13 @@ export type HandlerDeps = {
   // tool.loop events carry sessionKey but no runId; this maps the session's
   // active run back to its Turn so loop events can attach.
   runIdBySession: BoundedMap<string, string>;
+  // A tool span needs two signals to close with full content: the terminal
+  // diagnostic (status) and after_tool_call (result). OpenClaw runs
+  // after_tool_call fire-and-forget, so it usually lands after the terminal
+  // diagnostic. This holds the terminal status until the result arrives;
+  // run.completed force-closes any entry whose after_tool_call never fired.
+  pendingToolFinalize: BoundedMap<
+    string,
+    { status: "ok" | "error"; errorType?: string; runId?: string }
+  >;
 };

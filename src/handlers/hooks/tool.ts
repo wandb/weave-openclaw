@@ -3,6 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { captureToolEnd, captureToolStart } from "../../state/hook-state.js";
+import { finalizeTool } from "../diagnostic/tool.js";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
 
@@ -25,6 +26,9 @@ export function createToolHookHandlers(deps: HandlerDeps): {
       captureToolEnd(deps.hookState, event.toolCallId, {
         result: event.result,
       });
+      // Result is now buffered; close the span if the terminal diagnostic
+      // already recorded the status (the usual order).
+      finalizeTool(deps, event.toolCallId);
     },
   };
 }

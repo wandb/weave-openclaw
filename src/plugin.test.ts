@@ -324,6 +324,24 @@ describe("tool lifecycle", () => {
     expect(blocked.status.code).toBe(2);
   });
 
+  it("attaches the tool result when after_tool_call lands after tool.execution.completed (real OpenClaw order)", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-ord", toolName: "search", params: { q: "weave" } });
+    toolStarted(dispatch, { toolCallId: "tc-ord", spanId: "tcord" });
+    // Real runtime order: OpenClaw emits the terminal diagnostic synchronously
+    // when the tool returns, then runs after_tool_call fire-and-forget, so the
+    // result arrives AFTER tool.execution.completed (the reverse of the tests above).
+    toolCompleted(dispatch, { toolCallId: "tc-ord", spanId: "tcord" });
+    dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-ord", result: { hits: 7 } });
+    runCompleted(dispatch);
+    await finish();
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-ord");
+    assert(span);
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
+    expect(span.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
+    expect(span.status.code).not.toBe(2); // completed tool is not an error
+  });
+
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
     const { dispatch, finish } = await setupTurn({ captureContent: false });
     dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-nc", toolName: "search", params: { q: "secret" } });
