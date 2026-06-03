@@ -6,25 +6,53 @@ import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmOutputUsage } from "./hook-types.js";
 
-// llm_input/llm_output fire once per ATTEMPT (not per model.call), so chat spans
-// close here at run.completed with output texts attributed to spans positionally.
-export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
+type AttemptOutput = { texts?: string[]; usage?: LlmOutputUsage };
+
+// llm_output fires once per ATTEMPT (not per model.call). Close that attempt's open
+// chat spans now, attributing its output texts to its spans positionally, so input +
+// output export with the model response instead of being held until run.completed.
+export function finalizeAttemptChatSpans(
+  deps: HandlerDeps,
+  runId: string,
+  output: AttemptOutput,
+): void {
   const callIds = deps.hookState.chatCallsByRun.get(runId);
   deps.hookState.chatCallsByRun.delete(runId);
-  const output = deps.hookState.assistantOutputByRun.get(runId);
-  deps.hookState.assistantOutputByRun.delete(runId);
+  // The next attempt's llm_input must buffer fresh, not resolve to a now-closed
+  // callId; otherwise its input lands on the wrong (closed) span.
+  deps.hookState.currentCallByRun.delete(runId);
   if (!callIds || callIds.length === 0) return;
+  closeChatSpans(deps, runId, callIds, output);
+}
 
+// run.completed backstop: force-close any chat span still open (e.g. an attempt that
+// errored without emitting llm_output). Status was already set by onChatFinalize.
+export function finalizeRunChatSpans(deps: HandlerDeps, runId: string): void {
+  const callIds = deps.hookState.chatCallsByRun.get(runId);
+  deps.hookState.chatCallsByRun.delete(runId);
+  deps.hookState.currentCallByRun.delete(runId);
+  if (!callIds || callIds.length === 0) return;
+  closeChatSpans(deps, runId, callIds, {});
+}
+
+// Attribute output texts to the given chat spans positionally, record input/usage,
+// and end each span.
+function closeChatSpans(
+  deps: HandlerDeps,
+  runId: string,
+  callIds: string[],
+  output: AttemptOutput,
+): void {
   const captureContent = deps.getResolved()?.captureContent ?? false;
-  const texts = output?.texts ?? [];
-  const usage = toUsage(output?.usage);
+  const texts = output.texts ?? [];
+  const usage = toUsage(output.usage);
 
   if (texts.length > 0 && texts.length !== callIds.length) {
     deps.getLogger()?.warn(
       `weave: llm_output text count (${texts.length}) did not match tracked ` +
         `chat-span count (${callIds.length}) for runId=${runId}; surplus texts ` +
         `will be folded into the last chat span. If this fires for real traffic, ` +
-        `the positional attribution in closeRunChatSpans needs an upstream fix.`,
+        `the positional attribution in closeChatSpans needs an upstream fix.`,
     );
   }
 

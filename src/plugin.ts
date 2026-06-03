@@ -80,7 +80,6 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
     registries.tools.clear();
     registries.subagents.clear();
     params.hookState.chatCallsByRun.clear();
-    params.hookState.assistantOutputByRun.clear();
     costByRun.clear();
     pendingCompactionByRun.clear();
     runIdBySession.clear();

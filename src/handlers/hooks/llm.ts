@@ -8,6 +8,7 @@ import {
   captureLlmInput,
   resolveCurrentCallId,
 } from "../../state/hook-state.js";
+import { finalizeAttemptChatSpans } from "../llm-state.js";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
 
@@ -35,9 +36,10 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       }
     },
 
-    // buffer per-attempt output for closeRunChatSpans to attribute positionally.
+    // llm_output fires once per attempt; finalize that attempt's chat spans now so
+    // input + output export with the model response (not deferred to run.completed).
     llm_output(event: HookEvent<"llm_output">): void {
-      deps.hookState.assistantOutputByRun.set(event.runId, {
+      finalizeAttemptChatSpans(deps, event.runId, {
         texts: event.assistantTexts,
         usage: event.usage,
       });

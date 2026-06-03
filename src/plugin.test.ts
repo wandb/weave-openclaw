@@ -292,6 +292,53 @@ describe("closeRunChatSpans positional attribution", () => {
   });
 });
 
+describe("chat span finalizes per attempt at llm_output", () => {
+  it("exports the chat span at llm_output, before run.completed", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "cs1" });
+    dispatch.hook("llm_input", { runId: "r", prompt: "hi" });
+    modelCallCompleted(dispatch, { callId: "c-1", spanId: "cs1" });
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["hello"] });
+
+    // The chat span must already be exported, before run.completed fires.
+    expect(exporter.getFinishedSpans().some(s => s.name === "chat")).toBe(true);
+
+    runCompleted(dispatch);
+    await finish();
+  });
+
+  it("attributes each attempt's input and output to that attempt's own chat span", async () => {
+    const { dispatch, finish } = await setupTurn({ captureContent: true });
+
+    // Attempt 1: llm_input fires before the model call, then one llm_output.
+    dispatch.hook("llm_input", { runId: "r", prompt: "first question" });
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-A" });
+    modelCallStarted(dispatch, { callId: "c-A", spanId: "csA" });
+    modelCallCompleted(dispatch, { callId: "c-A", spanId: "csA" });
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["first answer"] });
+
+    // Attempt 2: a fresh input must land on the second call, not the first.
+    dispatch.hook("llm_input", { runId: "r", prompt: "second question" });
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-B" });
+    modelCallStarted(dispatch, { callId: "c-B", spanId: "csB" });
+    modelCallCompleted(dispatch, { callId: "c-B", spanId: "csB" });
+    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["second answer"] });
+
+    runCompleted(dispatch);
+    await finish();
+
+    const chats = exporter.getFinishedSpans().filter(s => s.name === "chat");
+    expect(chats).toHaveLength(2);
+    const first = chats.find(s => String(s.attributes["gen_ai.output.messages"]).includes("first answer"));
+    const second = chats.find(s => String(s.attributes["gen_ai.output.messages"]).includes("second answer"));
+    assert(first);
+    assert(second);
+    expect(String(first.attributes["gen_ai.input.messages"])).toContain("first question");
+    expect(String(second.attributes["gen_ai.input.messages"])).toContain("second question");
+  });
+});
+
 describe("tool lifecycle", () => {
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
     const { dispatch, finish } = await setupTurn();
@@ -503,7 +550,6 @@ describe("hot-reload / lifecycle", () => {
     expect(plugin.registries.tools.size).toBe(0);
     expect(plugin.registries.subagents.size).toBe(0);
     expect(hookState.chatCallsByRun.size).toBe(0);
-    expect(hookState.assistantOutputByRun.size).toBe(0);
 
     await plugin.service.stop({ logger: makeLogger() } as any);
   });
