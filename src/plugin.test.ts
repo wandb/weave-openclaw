@@ -4,6 +4,7 @@
 
 import { describe, it, expect, afterEach, vi, assert } from "vitest";
 import { createWeaveHookState } from "./state/hook-state.js";
+import { PACKAGE_VERSION } from "./config/version.js";
 import {
   bootPlugin,
   makeLogger,
@@ -91,15 +92,21 @@ describe("turn lifecycle", () => {
     expect(plugin.registries.turns.has("r-1")).toBe(false);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
-    expect(turn.attributes).toMatchInlineSnapshot(`
+    // Pin the version by value once, against the source constant, so a bump
+    // never has to be hand-edited; the snapshots below match it as Any<String>.
+    expect(turn.attributes["weave.agent.version"]).toBe(PACKAGE_VERSION);
+    expect(turn.attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
+    `,
+    );
   });
 
   it("maps outcome to span status: aborted stays OK, error marks ERROR (weave.outcome stamped)", async () => {
@@ -152,37 +159,46 @@ describe("turn lifecycle", () => {
     await finish();
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     expect(spans).toHaveLength(3);
-    expect(spans[0].attributes).toMatchInlineSnapshot(`
+    expect(spans[0].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 1500,
         "weave.agent.success": true,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
-    expect(spans[1].attributes).toMatchInlineSnapshot(`
+    `,
+    );
+    expect(spans[1].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 100,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
-    expect(spans[2].attributes).toMatchInlineSnapshot(`
+    `,
+    );
+    expect(spans[2].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.success": false,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
+    `,
+    );
   });
 });
 
