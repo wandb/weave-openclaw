@@ -274,6 +274,38 @@ describe("per-call output attribution", () => {
   });
 });
 
+describe("usage: input_tokens is the total prompt", () => {
+  // OTel gen_ai.usage.input_tokens must be the TOTAL prompt; providers report
+  // `input` as uncached-only with cache_read / cache_creation a disjoint subset.
+  // So input_tokens = input + cache_read + cache_creation, and cache_read stays a
+  // subset, keeping cache_read / input_tokens <= 100% downstream. (weave-claude-code#68)
+  it("chat span sums cache tokens into input_tokens (cache fields stay the subset)", async () => {
+    const { dispatch, finish } = await setupTurn({ captureContent: true });
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "cs1" });
+    assistantMessage(dispatch, { sessionKey: "s", text: "hi", usage: { input: 10, output: 4, cacheRead: 90, cacheWrite: 5 } });
+    modelCallCompleted(dispatch, { callId: "c-1", spanId: "cs1" });
+    runCompleted(dispatch);
+    await finish();
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    assert(chat);
+    expect(chat.attributes["gen_ai.usage.input_tokens"]).toBe(105); // 10 + 90 + 5
+    expect(chat.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(90);
+    expect(chat.attributes["gen_ai.usage.cache_creation.input_tokens"]).toBe(5);
+  });
+
+  it("Turn (model.usage) sums cache tokens into input_tokens", async () => {
+    const { dispatch, finish } = await setupTurn();
+    modelUsage(dispatch, { runId: "r", usage: { input: 10, output: 4, cacheRead: 90, cacheWrite: 5 } });
+    runCompleted(dispatch);
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
+    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(105); // 10 + 90 + 5
+    expect(turn.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(90);
+  });
+});
+
 describe("tool lifecycle", () => {
   it("opens execute_tool spans (stamping captured args/result) and marks error + blocked as ERROR", async () => {
     const { dispatch, finish } = await setupTurn();
@@ -377,7 +409,8 @@ describe("side-channel attrs on Turn", () => {
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
     expect(turn.attributes["weave.cost.usd"]).toBeCloseTo(0.15);
-    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(100);
+    // input_tokens is the total prompt: 100 uncached + 200 cache_read + 30 cache_creation.
+    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(330);
     expect(turn.attributes["gen_ai.usage.output_tokens"]).toBe(50);
     expect(turn.attributes["gen_ai.usage.total_tokens"]).toBe(380);
     expect(turn.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(200);
