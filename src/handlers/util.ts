@@ -23,9 +23,9 @@ export function setIfInt(turn: Turn | undefined, key: string, value: unknown): v
   }
 }
 
-// gen_ai.usage.input_tokens is the TOTAL prompt, but Anthropic reports `input` as
-// uncached-only with cache_read/cache_creation a disjoint subset, so sum the three
-// (keeps cache_read / input_tokens <= 100% downstream). Ref: weave-claude-code#68.
+// gen_ai.usage.input_tokens is the TOTAL prompt. OpenClaw normalizes `input` to
+// uncached-only (cache_read/cache_creation a disjoint subset across providers), so sum
+// the three (keeps cache_read / input_tokens <= 100% downstream). Ref: weave-claude-code#68.
 export function totalPromptTokens(
   input?: number,
   cacheRead?: number,

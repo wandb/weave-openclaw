@@ -304,6 +304,19 @@ describe("usage: input_tokens is the total prompt", () => {
     expect(turn.attributes["gen_ai.usage.input_tokens"]).toBe(105); // 10 + 90 + 5
     expect(turn.attributes["gen_ai.usage.cache_read.input_tokens"]).toBe(90);
   });
+
+  // totalPromptTokens returns undefined (not 0) with no prompt-token fields, so the
+  // attribute is omitted rather than emitting a spurious input_tokens=0.
+  it("omits input_tokens when the usage event carries no prompt-token fields", async () => {
+    const { dispatch, finish } = await setupTurn();
+    modelUsage(dispatch, { runId: "r", usage: { output: 4 } });
+    runCompleted(dispatch);
+    await finish();
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(turn);
+    expect(turn.attributes["gen_ai.usage.input_tokens"]).toBeUndefined();
+    expect(turn.attributes["gen_ai.usage.output_tokens"]).toBe(4);
+  });
 });
 
 describe("tool lifecycle", () => {
