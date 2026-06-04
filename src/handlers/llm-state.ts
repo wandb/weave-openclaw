@@ -4,62 +4,72 @@
 
 import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
-import type { LlmOutputUsage } from "./hook-types.js";
 
-// llm_input/llm_output fire once per ATTEMPT (not per model.call), so chat spans
-// close here at run.completed with output texts attributed to spans positionally.
-export function closeRunChatSpans(deps: HandlerDeps, runId: string): void {
+// model.call.completed/error: close THIS chat span now, recording its captured
+// input and output. Closing at model.call.completed (not deferring to run end) is
+// what makes both the user's input and the assistant's response export mid-run, so
+// they are visible while the turn is still running. The output is captured per call
+// by the before_message_write hook, which fires just before model.call.completed.
+export function finalizeChatSpan(
+  deps: HandlerDeps,
+  runId: string,
+  callId: string,
+  status: "ok" | "error",
+  errorType: string | undefined,
+): void {
+  if (!closeChatSpan(deps, callId, status, errorType)) return;
+  const list = deps.hookState.chatCallsByRun.get(runId);
+  if (list) {
+    const rest = list.filter((id) => id !== callId);
+    if (rest.length) deps.hookState.chatCallsByRun.set(runId, rest);
+    else deps.hookState.chatCallsByRun.delete(runId);
+  }
+}
+
+// run.completed backstop: close any chat span that never saw a model.call.completed
+// (e.g. an attempt that ended without one), so it never leaks open past its run.
+export function finalizeRunChatSpans(deps: HandlerDeps, runId: string): void {
   const callIds = deps.hookState.chatCallsByRun.get(runId);
   deps.hookState.chatCallsByRun.delete(runId);
-  const output = deps.hookState.assistantOutputByRun.get(runId);
-  deps.hookState.assistantOutputByRun.delete(runId);
-  if (!callIds || callIds.length === 0) return;
+  deps.hookState.currentCallByRun.delete(runId);
+  for (const callId of callIds ?? []) closeChatSpan(deps, callId, "ok", undefined);
+}
 
+// Close one chat span, recording its captured input and — if the
+// before_message_write hook delivered it for this call — the assistant output and
+// usage. Returns false when the callId has no live span.
+function closeChatSpan(
+  deps: HandlerDeps,
+  callId: string,
+  status: "ok" | "error",
+  errorType: string | undefined,
+): boolean {
+  const handle = deps.registries.calls.get(callId);
+  if (!handle) return false;
   const captureContent = deps.getResolved()?.captureContent ?? false;
-  const texts = output?.texts ?? [];
-  const usage = toUsage(output?.usage);
-
-  if (texts.length > 0 && texts.length !== callIds.length) {
-    deps.getLogger()?.warn(
-      `weave: llm_output text count (${texts.length}) did not match tracked ` +
-        `chat-span count (${callIds.length}) for runId=${runId}; surplus texts ` +
-        `will be folded into the last chat span. If this fires for real traffic, ` +
-        `the positional attribution in closeRunChatSpans needs an upstream fix.`,
-    );
+  const capturedInput = deps.hookState.llmInputs.get(callId);
+  const capturedOutput = deps.hookState.assistantOutputByCall.get(callId);
+  const shaped = shapeMessages(
+    { input: capturedInput, text: capturedOutput?.text },
+    captureContent,
+  );
+  const usage = toUsage(capturedOutput?.usage);
+  if (shaped.input.length || shaped.output.length || usage) {
+    handle.llm.record({
+      inputMessages: shaped.input,
+      outputMessages: shaped.output,
+      ...(usage ? { usage } : {}),
+    });
   }
-
-  for (let i = 0; i < callIds.length; i++) {
-    const callId = callIds[i]!;
-    const handle = deps.registries.calls.get(callId);
-    if (!handle) continue;
-    const isLast = i === callIds.length - 1;
-    const capturedInput = deps.hookState.llmInputs.get(callId);
-    // Positional; on mismatch fold surplus into / pad the last span so the answer survives.
-    let text: string | undefined;
-    if (isLast && texts.length > callIds.length) {
-      text = texts.slice(callIds.length - 1).join("\n");
-    } else if (i < texts.length) {
-      text = texts[i];
-    } else if (isLast && texts.length > 0) {
-      text = texts[texts.length - 1];
-    }
-    const shaped = shapeMessages({ input: capturedInput, text }, captureContent);
-    const recordUsage = isLast ? usage : undefined;
-    if (shaped.input.length || shaped.output.length || recordUsage) {
-      handle.llm.record({
-        inputMessages: shaped.input,
-        outputMessages: shaped.output,
-        ...(recordUsage ? { usage: recordUsage } : {}),
-      });
-    }
-    handle.llm.end(
-      handle.status === "error"
-        ? { error: new Error(handle.errorType ?? "model.call.error") }
-        : undefined,
-    );
-    deps.registries.calls.delete(callId);
-    deps.hookState.llmInputs.delete(callId);
-  }
+  handle.llm.end(
+    status === "error"
+      ? { error: new Error(errorType ?? "model.call.error") }
+      : undefined,
+  );
+  deps.registries.calls.delete(callId);
+  deps.hookState.llmInputs.delete(callId);
+  deps.hookState.assistantOutputByCall.delete(callId);
+  return true;
 }
 
 function isMessage(value: unknown): value is Message {
@@ -93,7 +103,9 @@ function shapeMessages(
   return out;
 }
 
-function toUsage(raw: LlmOutputUsage): Usage | undefined {
+function toUsage(
+  raw: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
+): Usage | undefined {
   if (!raw) return undefined;
   const usage: Usage = {
     inputTokens: raw.input,
@@ -101,7 +113,6 @@ function toUsage(raw: LlmOutputUsage): Usage | undefined {
     cacheReadInputTokens: raw.cacheRead,
     cacheCreationInputTokens: raw.cacheWrite,
   };
-  // Drop if nothing useful was set.
   if (
     usage.inputTokens === undefined &&
     usage.outputTokens === undefined &&

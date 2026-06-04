@@ -112,6 +112,19 @@ export const toolBlocked = (d: any, { runId = "r", toolCallId, spanId, traceId =
 export const modelUsage = (d: any, { runId = "r", costUsd, usage, ts = 1, trace = TRACE }: any) =>
   d.diagnostic({ type: "model.usage", ts, runId, costUsd, usage, trace });
 
+// before_message_write carrying an assistant message — the per-call output source.
+// ctx.sessionKey correlates it to the run's in-flight call (sessionKey -> runId via
+// runIdBySession -> currentCallByRun). Fires just before that call's model.call.completed.
+export const assistantMessage = (
+  d: any,
+  { sessionKey = "s", text, usage }: { sessionKey?: string; text?: string; usage?: any } = {},
+) =>
+  d.hook(
+    "before_message_write",
+    { message: { role: "assistant", content: text ? [{ type: "text", text }] : [], usage } },
+    { sessionKey },
+  );
+
 // Boot a running plugin and open the default "r" Turn (the start of every
 // per-run suite). Close with `runCompleted(dispatch)` + `await finish()`.
 export async function setupTurn(extraConfig: Record<string, unknown> = {}) {

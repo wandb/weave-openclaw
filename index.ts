@@ -48,7 +48,7 @@ export default definePluginEntry({
     api.on("session_end", (event, ctx) => hooks.session_end?.(event, ctx));
     api.on("model_call_started", (event, ctx) => hooks.model_call_started?.(event, ctx));
     api.on("llm_input", (event, ctx) => hooks.llm_input?.(event, ctx));
-    api.on("llm_output", (event, ctx) => hooks.llm_output?.(event, ctx));
+    api.on("before_message_write", (event, ctx) => hooks.before_message_write?.(event, ctx));
     api.on("before_tool_call", (event, ctx) => hooks.before_tool_call?.(event, ctx));
     api.on("after_tool_call", (event, ctx) => hooks.after_tool_call?.(event, ctx));
     api.on("subagent_spawned", (event, ctx) => hooks.subagent_spawned?.(event, ctx));

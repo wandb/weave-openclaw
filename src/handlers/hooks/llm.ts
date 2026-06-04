@@ -5,16 +5,17 @@
 import {
   beginModelCall,
   bufferPendingLlmInputForRun,
+  captureAssistantOutput,
   captureLlmInput,
   resolveCurrentCallId,
 } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";
-import type { HookEvent, HookHandler } from "../hook-types.js";
+import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
 
 export function createLlmHookHandlers(deps: HandlerDeps): {
   model_call_started: HookHandler<"model_call_started">;
   llm_input: HookHandler<"llm_input">;
-  llm_output: HookHandler<"llm_output">;
+  before_message_write: HookHandler<"before_message_write">;
 } {
   return {
     model_call_started(event: HookEvent<"model_call_started">): void {
@@ -35,12 +36,44 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       }
     },
 
-    // buffer per-attempt output for closeRunChatSpans to attribute positionally.
-    llm_output(event: HookEvent<"llm_output">): void {
-      deps.hookState.assistantOutputByRun.set(event.runId, {
-        texts: event.assistantTexts,
-        usage: event.usage,
+    // The assistant message fires here just before its model.call.completed, so
+    // capture this call's output now; onChatFinalize records it on the chat span
+    // as it closes (mid-run). The hook carries no callId, so correlate to the
+    // in-flight call via sessionKey -> runId -> currentCallByRun.
+    before_message_write(
+      event: HookEvent<"before_message_write">,
+      ctx: HookCtx<"before_message_write">,
+    ): void {
+      const message = event.message as {
+        role?: string;
+        content?: unknown;
+        usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+      };
+      if (message?.role !== "assistant") return;
+      const sessionKey =
+        (ctx as { sessionKey?: string })?.sessionKey ??
+        (event as { sessionKey?: string }).sessionKey;
+      const runId = sessionKey ? deps.runIdBySession.get(sessionKey) : undefined;
+      const callId = runId ? resolveCurrentCallId(deps.hookState, runId) : undefined;
+      if (!callId) return;
+      captureAssistantOutput(deps.hookState, callId, {
+        text: extractAssistantText(message.content),
+        usage: message.usage,
       });
     },
   };
+}
+
+// Pull the assistant's text out of an AgentMessage's content (a string, or an
+// array of { type: "text", text } / { type: "toolCall", ... } blocks). Tool calls
+// surface as their own execute_tool spans, so only the text lands on the chat span.
+function extractAssistantText(content: unknown): string | undefined {
+  if (typeof content === "string") return content || undefined;
+  if (!Array.isArray(content)) return undefined;
+  const text = content
+    .filter((b): b is { type?: string; text?: string } => typeof b === "object" && b !== null)
+    .filter((b) => b.type === "text" && typeof b.text === "string")
+    .map((b) => b.text as string)
+    .join("");
+  return text || undefined;
 }
