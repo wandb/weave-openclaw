@@ -16,7 +16,7 @@ type LlmInputCapture = {
 // Per-model-call assistant output, captured from the before_message_write hook
 // (which fires with the assistant message just before model.call.completed) so
 // the chat span can carry its output when it closes mid-run.
-export type AssistantOutputCapture = {
+type AssistantOutputCapture = {
   text?: string;
   usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
 };

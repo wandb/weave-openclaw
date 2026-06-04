@@ -44,15 +44,15 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       event: HookEvent<"before_message_write">,
       ctx: HookCtx<"before_message_write">,
     ): void {
+      // event.message is the external AgentMessage union (from pi-agent-core, a
+      // transitive dep we don't import); read the few fields we need structurally.
       const message = event.message as {
         role?: string;
         content?: unknown;
         usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
       };
-      if (message?.role !== "assistant") return;
-      const sessionKey =
-        (ctx as { sessionKey?: string })?.sessionKey ??
-        (event as { sessionKey?: string }).sessionKey;
+      if (message.role !== "assistant") return;
+      const sessionKey = ctx.sessionKey ?? event.sessionKey;
       const runId = sessionKey ? deps.runIdBySession.get(sessionKey) : undefined;
       const callId = runId ? resolveCurrentCallId(deps.hookState, runId) : undefined;
       if (!callId) return;
@@ -70,10 +70,10 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
 function extractAssistantText(content: unknown): string | undefined {
   if (typeof content === "string") return content || undefined;
   if (!Array.isArray(content)) return undefined;
-  const text = content
-    .filter((b): b is { type?: string; text?: string } => typeof b === "object" && b !== null)
-    .filter((b) => b.type === "text" && typeof b.text === "string")
-    .map((b) => b.text as string)
+  const blocks = content as Array<{ type?: string; text?: string }>;
+  const text = blocks
+    .filter((b): b is { type: "text"; text: string } => b?.type === "text" && typeof b.text === "string")
+    .map((b) => b.text)
     .join("");
   return text || undefined;
 }
