@@ -6,11 +6,8 @@ import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmUsage } from "./hook-types.js";
 
-// model.call.completed/error: close THIS chat span now, recording its captured
-// input and output. Closing at model.call.completed (not deferring to run end) is
-// what makes both the user's input and the assistant's response export mid-run, so
-// they are visible while the turn is still running. The output is captured per call
-// by the before_message_write hook, which fires just before model.call.completed.
+// Close this chat span at model.call.completed (not run end) so its input and
+// per-call output export mid-run, while the turn is still running.
 export function finalizeChatSpan(
   deps: HandlerDeps,
   runId: string,
@@ -27,8 +24,7 @@ export function finalizeChatSpan(
   }
 }
 
-// run.completed backstop: close any chat span that never saw a model.call.completed
-// (e.g. an attempt that ended without one), so it never leaks open past its run.
+// run.completed backstop: close any chat span that never saw a model.call.completed.
 export function finalizeRunChatSpans(deps: HandlerDeps, runId: string): void {
   const callIds = deps.hookState.chatCallsByRun.get(runId);
   deps.hookState.chatCallsByRun.delete(runId);
@@ -36,9 +32,8 @@ export function finalizeRunChatSpans(deps: HandlerDeps, runId: string): void {
   for (const callId of callIds ?? []) closeChatSpan(deps, callId, "ok", undefined);
 }
 
-// Close one chat span, recording its captured input and — if the
-// before_message_write hook delivered it for this call — the assistant output and
-// usage. Returns false when the callId has no live span.
+// Close one chat span with its captured input and (if any) output + usage.
+// Returns false when the callId has no live span.
 function closeChatSpan(
   deps: HandlerDeps,
   callId: string,
@@ -98,7 +93,7 @@ function shapeMessages(
       out.input.push({ role: "user", content: capture.input.prompt });
     }
   }
-  if (captureContent && typeof capture.text === "string" && capture.text.length > 0) {
+  if (captureContent && capture.text) {
     out.output.push({ role: "assistant", content: capture.text });
   }
   return out;

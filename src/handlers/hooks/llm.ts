@@ -36,16 +36,14 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       }
     },
 
-    // The assistant message fires here just before its model.call.completed, so
-    // capture this call's output now; onChatFinalize records it on the chat span
-    // as it closes (mid-run). The hook carries no callId, so correlate to the
-    // in-flight call via sessionKey -> runId -> currentCallByRun.
+    // Assistant message fires just before this call's model.call.completed; capture
+    // its output now. No callId on the hook, so correlate via sessionKey -> runId ->
+    // currentCallByRun.
     before_message_write(
       event: HookEvent<"before_message_write">,
       ctx: HookCtx<"before_message_write">,
     ): void {
-      // event.message is the external AgentMessage union (from pi-agent-core, a
-      // transitive dep we don't import); read the few fields we need structurally.
+      // event.message is pi-agent-core's AgentMessage union (not imported); read structurally.
       const message = event.message as {
         role?: string;
         content?: unknown;
@@ -64,15 +62,14 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
   };
 }
 
-// Pull the assistant's text out of an AgentMessage's content (a string, or an
-// array of { type: "text", text } / { type: "toolCall", ... } blocks). Tool calls
-// surface as their own execute_tool spans, so only the text lands on the chat span.
+// Assistant text from an AgentMessage's content (string, or text/toolCall blocks).
+// Tool calls get their own execute_tool spans, so only text lands on the chat span.
 function extractAssistantText(content: unknown): string | undefined {
   if (typeof content === "string") return content || undefined;
   if (!Array.isArray(content)) return undefined;
   const blocks = content as Array<{ type?: string; text?: string }>;
   const text = blocks
-    .filter((b): b is { type: "text"; text: string } => b?.type === "text" && typeof b.text === "string")
+    .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
     .map((b) => b.text)
     .join("");
   return text || undefined;
