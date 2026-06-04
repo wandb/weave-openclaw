@@ -117,8 +117,8 @@ function clearToolCall(deps: HandlerDeps, toolCallId: string): void {
 // run.completed backstop: close any tool of this run still waiting on an
 // after_tool_call that never arrived, so its span never leaks open.
 export function finalizeRunTools(deps: HandlerDeps, runId: string): void {
-  for (const toolCallId of [...deps.pendingToolFinalize.keys()]) {
-    if (deps.pendingToolFinalize.get(toolCallId)?.runId !== runId) continue;
+  for (const [toolCallId, pending] of deps.pendingToolFinalize) {
+    if (pending.runId !== runId) continue;
     finalizeTool(deps, toolCallId, { force: true });
     deps.pendingToolFinalize.delete(toolCallId);
   }
