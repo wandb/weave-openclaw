@@ -43,22 +43,17 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
       errorType: string | undefined,
     ): void {
       if (!event.toolCallId) return;
-      const tool = deps.registries.tools.get(event.toolCallId);
-      if (!tool) return;
-      const resolved = deps.getResolved();
-      if (resolved?.captureContent) {
-        const captured = lookupToolCall(deps.hookState, event.toolCallId).result;
-        const result = safeJson(captured?.result);
-        if (result !== undefined) tool.result = result;
-      }
-      tool.end(
-        status === "error"
-          ? { error: new Error(errorType ?? "tool.execution.error") }
-          : undefined,
-      );
-      deps.registries.tools.delete(event.toolCallId);
-      deps.hookState.toolCallArgs.delete(event.toolCallId);
-      deps.hookState.toolCallResults.delete(event.toolCallId);
+      if (!deps.registries.tools.has(event.toolCallId)) return;
+      // The result rides in on after_tool_call, which OpenClaw fires
+      // fire-and-forget — usually after this terminal diagnostic. Record the
+      // status and let finalizeTool close the span once the result is in (or
+      // now, if after_tool_call already won the race).
+      deps.pendingToolFinalize.set(event.toolCallId, {
+        status,
+        errorType,
+        runId: event.runId,
+      });
+      finalizeTool(deps, event.toolCallId);
     },
 
     onToolLoop(event: ToolLoopEvent): void {
@@ -80,4 +75,51 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
       turn.addEvent("tool.loop", attrs);
     },
   };
+}
+
+// Close a tool span once both signals are in: the terminal diagnostic (status,
+// held in pendingToolFinalize) and after_tool_call (result, in the hook-state
+// buffer). Whichever arrives second triggers the end. `force` closes with
+// whatever is available — used by the run.completed backstop for a tool whose
+// after_tool_call never fired (e.g. a blocked call).
+export function finalizeTool(
+  deps: HandlerDeps,
+  toolCallId: string,
+  opts: { force?: boolean } = {},
+): void {
+  const tool = deps.registries.tools.get(toolCallId);
+  if (!tool) return;
+  const pending = deps.pendingToolFinalize.get(toolCallId);
+  if (!pending && !opts.force) return; // no terminal status yet
+  const captured = lookupToolCall(deps.hookState, toolCallId).result;
+  if (!opts.force && captured === undefined) return; // after_tool_call not in yet
+  if (deps.getResolved()?.captureContent) {
+    const result = safeJson(captured?.result);
+    if (result !== undefined) tool.result = result;
+  }
+  tool.end(
+    pending?.status === "error"
+      ? { error: new Error(pending.errorType ?? "tool.execution.error") }
+      : undefined,
+  );
+  clearToolCall(deps, toolCallId);
+}
+
+// Single owner of per-tool-call teardown: every map keyed by toolCallId is
+// dropped here, so adding new tool-call state is one edit, not a scavenger hunt.
+function clearToolCall(deps: HandlerDeps, toolCallId: string): void {
+  deps.registries.tools.delete(toolCallId);
+  deps.pendingToolFinalize.delete(toolCallId);
+  deps.hookState.toolCallArgs.delete(toolCallId);
+  deps.hookState.toolCallResults.delete(toolCallId);
+}
+
+// run.completed backstop: close any tool of this run still waiting on an
+// after_tool_call that never arrived, so its span never leaks open.
+export function finalizeRunTools(deps: HandlerDeps, runId: string): void {
+  for (const [toolCallId, pending] of deps.pendingToolFinalize) {
+    if (pending.runId !== runId) continue;
+    finalizeTool(deps, toolCallId, { force: true });
+    deps.pendingToolFinalize.delete(toolCallId);
+  }
 }

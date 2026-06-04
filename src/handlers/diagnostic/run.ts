@@ -7,6 +7,7 @@ import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runt
 import type { HandlerDeps } from "../deps.js";
 import { getOrCreateSession } from "../hooks/session.js";
 import { closeRunChatSpans } from "../llm-state.js";
+import { finalizeRunTools } from "./tool.js";
 
 type RunStartedEvent = Extract<DiagnosticEventPayload, { type: "run.started" }>;
 type RunCompletedEvent = Extract<DiagnosticEventPayload, { type: "run.completed" }>;
@@ -39,6 +40,9 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
     // Only the "error" outcome marks the Turn ERROR; completed and aborted stay OK.
     onRunFinalize(event: RunCompletedEvent): void {
       closeRunChatSpans(deps, event.runId);
+      // Close any tool span still waiting on a fire-and-forget after_tool_call
+      // that never landed, so it never leaks open past its run.
+      finalizeRunTools(deps, event.runId);
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       turn.setAttribute("weave.outcome", event.outcome);

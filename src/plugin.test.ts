@@ -4,6 +4,7 @@
 
 import { describe, it, expect, afterEach, vi, assert } from "vitest";
 import { createWeaveHookState } from "./state/hook-state.js";
+import { PACKAGE_VERSION } from "./config/version.js";
 import {
   bootPlugin,
   makeLogger,
@@ -91,15 +92,21 @@ describe("turn lifecycle", () => {
     expect(plugin.registries.turns.has("r-1")).toBe(false);
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
     assert(turn);
-    expect(turn.attributes).toMatchInlineSnapshot(`
+    // Pin the version by value once, against the source constant, so a bump
+    // never has to be hand-edited; the snapshots below match it as Any<String>.
+    expect(turn.attributes["weave.agent.version"]).toBe(PACKAGE_VERSION);
+    expect(turn.attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
+    `,
+    );
   });
 
   it("maps outcome to span status: aborted stays OK, error marks ERROR (weave.outcome stamped)", async () => {
@@ -152,37 +159,46 @@ describe("turn lifecycle", () => {
     await finish();
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     expect(spans).toHaveLength(3);
-    expect(spans[0].attributes).toMatchInlineSnapshot(`
+    expect(spans[0].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 1500,
         "weave.agent.success": true,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
-    expect(spans[1].attributes).toMatchInlineSnapshot(`
+    `,
+    );
+    expect(spans[1].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 100,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
-    expect(spans[2].attributes).toMatchInlineSnapshot(`
+    `,
+    );
+    expect(spans[2].attributes).toMatchInlineSnapshot(
+      { "weave.agent.version": expect.any(String) },
+      `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.success": false,
-        "weave.agent.version": "0.0.3",
+        "weave.agent.version": Any<String>,
         "weave.outcome": "completed",
       }
-    `);
+    `,
+    );
   });
 });
 
@@ -306,6 +322,24 @@ describe("tool lifecycle", () => {
     expect(ok.status.code).not.toBe(2); // completed tool is not an error
     expect(errored.status.code).toBe(2);
     expect(blocked.status.code).toBe(2);
+  });
+
+  it("attaches the tool result when after_tool_call lands after tool.execution.completed (real OpenClaw order)", async () => {
+    const { dispatch, finish } = await setupTurn();
+    dispatch.hook("before_tool_call", { runId: "r", toolCallId: "tc-ord", toolName: "search", params: { q: "weave" } });
+    toolStarted(dispatch, { toolCallId: "tc-ord", spanId: "tcord" });
+    // Real runtime order: OpenClaw emits the terminal diagnostic synchronously
+    // when the tool returns, then runs after_tool_call fire-and-forget, so the
+    // result arrives AFTER tool.execution.completed (the reverse of the tests above).
+    toolCompleted(dispatch, { toolCallId: "tc-ord", spanId: "tcord" });
+    dispatch.hook("after_tool_call", { runId: "r", toolCallId: "tc-ord", result: { hits: 7 } });
+    runCompleted(dispatch);
+    await finish();
+    const span = exporter.getFinishedSpans().find(s => s.attributes["gen_ai.tool.call.id"] === "tc-ord");
+    assert(span);
+    expect(span.attributes["gen_ai.tool.call.arguments"]).toBe('{"q":"weave"}');
+    expect(span.attributes["gen_ai.tool.call.result"]).toBe('{"hits":7}');
+    expect(span.status.code).not.toBe(2); // completed tool is not an error
   });
 
   it("does not stamp gen_ai.tool.call.* content when captureContent=false", async () => {
