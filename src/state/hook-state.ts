@@ -3,6 +3,7 @@
 // SPDX-PackageName: weave-openclaw
 
 import { BoundedMap } from "../util/bounded-map.js";
+import type { LlmUsage } from "../handlers/hook-types.js";
 
 // Capture buffers shared between hooks and the diagnostic service: hooks hold
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
@@ -18,7 +19,7 @@ type LlmInputCapture = {
 // the chat span can carry its output when it closes mid-run.
 type AssistantOutputCapture = {
   text?: string;
-  usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+  usage?: LlmUsage;
 };
 
 type ToolCallArgsCapture = {
@@ -90,7 +91,6 @@ export function captureLlmInput(
   callId: string,
   capture: LlmInputCapture,
 ): void {
-  if (!callId) return;
   state.llmInputs.set(callId, capture);
 }
 
@@ -99,7 +99,6 @@ export function captureAssistantOutput(
   callId: string,
   capture: AssistantOutputCapture,
 ): void {
-  if (!callId) return;
   state.assistantOutputByCall.set(callId, capture);
 }
 

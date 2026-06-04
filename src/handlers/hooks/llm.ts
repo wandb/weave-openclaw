@@ -10,7 +10,7 @@ import {
   resolveCurrentCallId,
 } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";
-import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
+import type { HookCtx, HookEvent, HookHandler, LlmUsage } from "../hook-types.js";
 
 export function createLlmHookHandlers(deps: HandlerDeps): {
   model_call_started: HookHandler<"model_call_started">;
@@ -49,7 +49,7 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       const message = event.message as {
         role?: string;
         content?: unknown;
-        usage?: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number };
+        usage?: LlmUsage;
       };
       if (message.role !== "assistant") return;
       const sessionKey = ctx.sessionKey ?? event.sessionKey;

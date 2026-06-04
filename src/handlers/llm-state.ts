@@ -4,6 +4,7 @@
 
 import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
+import type { LlmUsage } from "./hook-types.js";
 
 // model.call.completed/error: close THIS chat span now, recording its captured
 // input and output. Closing at model.call.completed (not deferring to run end) is
@@ -103,9 +104,7 @@ function shapeMessages(
   return out;
 }
 
-function toUsage(
-  raw: { input?: number; output?: number; cacheRead?: number; cacheWrite?: number } | undefined,
-): Usage | undefined {
+function toUsage(raw: LlmUsage | undefined): Usage | undefined {
   if (!raw) return undefined;
   const usage: Usage = {
     inputTokens: raw.input,
