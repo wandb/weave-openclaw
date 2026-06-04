@@ -23,11 +23,9 @@ export function setIfInt(turn: Turn | undefined, key: string, value: unknown): v
   }
 }
 
-// OTel gen_ai.usage.input_tokens is the TOTAL prompt. Providers (Anthropic) report
-// `input` as uncached-only, with cache_read / cache_creation a disjoint subset; sum
-// the three so cache_read / input_tokens stays <= 100% downstream. The cache fields
-// are still emitted separately as the breakdown. Returns undefined when all absent.
-// Ref: weave-claude-code#68; https://opentelemetry.io/docs/specs/semconv/gen-ai/anthropic/
+// gen_ai.usage.input_tokens is the TOTAL prompt, but Anthropic reports `input` as
+// uncached-only with cache_read/cache_creation a disjoint subset, so sum the three
+// (keeps cache_read / input_tokens <= 100% downstream). Ref: weave-claude-code#68.
 export function totalPromptTokens(
   input?: number,
   cacheRead?: number,
