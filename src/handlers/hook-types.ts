@@ -17,7 +17,6 @@ export type HookCtx<K extends HookName> = Parameters<HookHandler<K>>[1];
 
 export type HookHandlers = { [K in HookName]?: HookHandler<K> };
 
-// OpenClaw's per-call token usage shape (input/output/cache counts), recovered from
-// the llm_output event type. The one place this shape is named; reused by the
-// assistant-output capture and the toUsage mapper instead of re-declaring it.
+// OpenClaw's per-call usage shape, recovered from the llm_output event type.
+// Named once here; reused by the assistant-output capture and toUsage.
 export type LlmUsage = HookEvent<"llm_output">["usage"];
