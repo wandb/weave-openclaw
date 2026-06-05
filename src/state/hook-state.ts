@@ -8,7 +8,7 @@ import type { LlmUsage } from "../handlers/hook-types.js";
 // Capture buffers shared between hooks and the diagnostic service: hooks hold
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
 
-type LlmInputCapture = {
+export type LlmInputCapture = {
   systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];

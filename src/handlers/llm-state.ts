@@ -6,9 +6,10 @@ import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmUsage } from "./hook-types.js";
 import { totalPromptTokens } from "./util.js";
+import type { LlmInputCapture } from "../state/hook-state.js";
 
-// Close this chat span at model.call.completed (not run end) so its input and
-// per-call output export mid-run, while the turn is still running.
+// Close this chat span at model.call.completed/error (not run end) so its input
+// and per-call output export mid-run, while the turn is still running.
 export function finalizeChatSpan(
   deps: HandlerDeps,
   runId: string,
@@ -44,12 +45,10 @@ function closeChatSpan(
   const handle = deps.registries.calls.get(callId);
   if (!handle) return false;
   const captureContent = deps.getResolved()?.captureContent ?? false;
-  const capturedInput = deps.hookState.llmInputs.get(callId);
   const capturedOutput = deps.hookState.assistantOutputByCall.get(callId);
-  const shaped = shapeMessages(
-    { input: capturedInput, text: capturedOutput?.text },
-    captureContent,
-  );
+  const shaped = captureContent
+    ? shapeMessages({ input: deps.hookState.llmInputs.get(callId), text: capturedOutput?.text })
+    : { input: [], output: [] };
   const usage = toUsage(capturedOutput?.usage);
   if (shaped.input.length || shaped.output.length || usage) {
     handle.llm.record({
@@ -73,15 +72,12 @@ function isMessage(value: unknown): value is Message {
   return typeof value === "object" && value !== null && "role" in value && "content" in value;
 }
 
-function shapeMessages(
-  capture: {
-    input?: { systemPrompt?: string; prompt: string; historyMessages?: unknown[] };
-    text?: string;
-  },
-  captureContent: boolean,
-): { input: Message[]; output: Message[] } {
+function shapeMessages(capture: {
+  input?: LlmInputCapture;
+  text?: string;
+}): { input: Message[]; output: Message[] } {
   const out: { input: Message[]; output: Message[] } = { input: [], output: [] };
-  if (captureContent && capture.input) {
+  if (capture.input) {
     if (capture.input.systemPrompt) {
       out.input.push({ role: "system", content: capture.input.systemPrompt });
     }
@@ -94,7 +90,7 @@ function shapeMessages(
       out.input.push({ role: "user", content: capture.input.prompt });
     }
   }
-  if (captureContent && capture.text) {
+  if (capture.text) {
     out.output.push({ role: "assistant", content: capture.text });
   }
   return out;

@@ -117,7 +117,7 @@ export const modelUsage = (d: any, { runId = "r", costUsd, usage, ts = 1, trace 
 // runIdBySession -> currentCallByRun). Fires just before that call's model.call.completed.
 export const assistantMessage = (
   d: any,
-  { sessionKey = "s", text, usage }: { sessionKey?: string; text?: string; usage?: any } = {},
+  { sessionKey, text, usage }: { sessionKey: string; text: string; usage?: any },
 ) =>
   d.hook(
     "before_message_write",
