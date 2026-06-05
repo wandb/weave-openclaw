@@ -5,6 +5,7 @@
 import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmUsage } from "./hook-types.js";
+import type { LlmInputCapture } from "../state/hook-state.js";
 
 // Close this chat span at model.call.completed/error (not run end) so its input
 // and per-call output export mid-run, while the turn is still running.
@@ -74,7 +75,7 @@ function isMessage(value: unknown): value is Message {
 
 function shapeMessages(
   capture: {
-    input?: { systemPrompt?: string; prompt: string; historyMessages?: unknown[] };
+    input?: LlmInputCapture;
     text?: string;
   },
   captureContent: boolean,
