@@ -6,8 +6,8 @@ import type { Message, Usage } from "weave";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmUsage } from "./hook-types.js";
 
-// Close this chat span at model.call.completed (not run end) so its input and
-// per-call output export mid-run, while the turn is still running.
+// Close this chat span at model.call.completed/error (not run end) so its input
+// and per-call output export mid-run, while the turn is still running.
 export function finalizeChatSpan(
   deps: HandlerDeps,
   runId: string,
