@@ -27,9 +27,9 @@ export function setIfInt(turn: Turn | undefined, key: string, value: unknown): v
 // uncached-only (cache_read/cache_creation a disjoint subset across providers), so sum
 // the three (keeps cache_read / input_tokens <= 100% downstream). Ref: weave-claude-code#68.
 export function totalPromptTokens(
-  input?: number,
-  cacheRead?: number,
-  cacheWrite?: number,
+  input: number | undefined,
+  cacheRead: number | undefined,
+  cacheWrite: number | undefined,
 ): number | undefined {
   if (input === undefined && cacheRead === undefined && cacheWrite === undefined) {
     return undefined;
