@@ -21,6 +21,7 @@ import {
   toolError,
   toolBlocked,
   modelUsage,
+  assistantMessage,
 } from "./test/helpers.js";
 
 // Stub weave.login so tests don't hit the live server or write ~/.netrc.
@@ -211,7 +212,8 @@ describe("llm two-signal close", () => {
     expect(hookState.pendingLlmInputByRun.has("r")).toBe(false);
     expect(hookState.llmInputs.has("c-1")).toBe(true);
     modelCallStarted(dispatch, { callId: "c-1", spanId: "sp2" });
-    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["hello"], usage: { input: 5, output: 3 } });
+    // Per-call output + usage arrive via before_message_write, just before the call completes.
+    assistantMessage(dispatch, { sessionKey: "s", text: "hello", usage: { input: 5, output: 3 } });
     modelCallCompleted(dispatch, { callId: "c-1", spanId: "sp2" });
     runCompleted(dispatch);
     await finish();
@@ -248,47 +250,27 @@ describe("llm two-signal close", () => {
   });
 });
 
-describe("closeRunChatSpans positional attribution", () => {
-  async function twoCallRun(texts: string[]) {
-    const { dispatch, finish } = await bootPlugin();
-    runStarted(dispatch);
-    for (const callId of ["c-1", "c-2"]) {
+describe("per-call output attribution", () => {
+  // Each model call's output rides in on its own before_message_write; closing the
+  // chat span at model.call.completed records that call's text. No per-attempt
+  // positional folding anymore — output is per call by construction.
+  it("attaches each call's own assistant text to its own chat span", async () => {
+    const { dispatch, finish } = await setupTurn({ captureContent: true });
+    for (const [callId, text] of [["c-1", "first text"], ["c-2", "second text"]] as const) {
       dispatch.hook("model_call_started", { runId: "r", callId });
       modelCallStarted(dispatch, { callId, spanId: callId });
+      assistantMessage(dispatch, { sessionKey: "s", text });
       modelCallCompleted(dispatch, { callId, spanId: callId });
     }
-    dispatch.hook("llm_output", { runId: "r", assistantTexts: texts });
     runCompleted(dispatch);
     await finish();
-    return exporter.getFinishedSpans().filter(s => s.name === "chat").map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
-  }
-
-  it("folds surplus texts into the last span and pads scarcity from the last text", async () => {
-    const surplus = await twoCallRun(["call-1-text", "call-2-text", "trailing-overflow"]);
-    expect(surplus.length).toBe(2);
-    expect(surplus[0]).toContain("call-1-text");
-    expect(surplus[0]).not.toContain("trailing-overflow");
-    expect(surplus[1]).toContain("call-2-text");
-    expect(surplus[1]).toContain("trailing-overflow");
-
-    exporter.reset();
-    const scarcity = await twoCallRun(["only-text"]);
-    expect(scarcity.length).toBe(2);
-    expect(scarcity[0]).toContain("only-text");
-    expect(scarcity[1]).toContain("only-text");
-  });
-
-  it("warns when llm_output text count drifts from the tracked chat-span count", async () => {
-    const { dispatch, finish, logger } = await bootPlugin();
-    runStarted(dispatch);
-    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
-    modelCallStarted(dispatch, { callId: "c-1", spanId: "cs1" });
-    modelCallCompleted(dispatch, { callId: "c-1", spanId: "cs1" });
-    dispatch.hook("llm_output", { runId: "r", assistantTexts: ["a", "b"] }); // 2 texts, 1 tracked span
-    runCompleted(dispatch);
-    await finish();
-    const warned = (logger.warn as any).mock.calls.map((c: any[]) => String(c[0])).some((m: string) => m.includes("did not match tracked chat-span count"));
-    expect(warned).toBe(true);
+    const outputs = exporter
+      .getFinishedSpans()
+      .filter(s => s.name === "chat")
+      .map(s => String(s.attributes["gen_ai.output.messages"] ?? ""));
+    expect(outputs.length).toBe(2);
+    expect(outputs[0]).toContain("first text");
+    expect(outputs[1]).toContain("second text");
   });
 });
 
@@ -459,8 +441,8 @@ describe("concurrent runs", () => {
 
     dispatch.hook("llm_input", { runId: "r-A", prompt: "from A" });
     dispatch.hook("llm_input", { runId: "r-B", prompt: "from B" });
-    dispatch.hook("llm_output", { runId: "r-A", assistantTexts: ["A answered"], usage: { input: 1, output: 1 } });
-    dispatch.hook("llm_output", { runId: "r-B", assistantTexts: ["B answered"], usage: { input: 2, output: 2 } });
+    assistantMessage(dispatch, { sessionKey: "s-A", text: "A answered", usage: { input: 1, output: 1 } });
+    assistantMessage(dispatch, { sessionKey: "s-B", text: "B answered", usage: { input: 2, output: 2 } });
     modelCallCompleted(dispatch, { runId: "r-A", callId: "c-A", spanId: "csa", traceId: "ta" });
     modelCallCompleted(dispatch, { runId: "r-B", callId: "c-B", spanId: "csb", traceId: "tb" });
 
@@ -503,7 +485,7 @@ describe("hot-reload / lifecycle", () => {
     expect(plugin.registries.tools.size).toBe(0);
     expect(plugin.registries.subagents.size).toBe(0);
     expect(hookState.chatCallsByRun.size).toBe(0);
-    expect(hookState.assistantOutputByRun.size).toBe(0);
+    expect(hookState.assistantOutputByCall.size).toBe(0);
 
     await plugin.service.stop({ logger: makeLogger() } as any);
   });

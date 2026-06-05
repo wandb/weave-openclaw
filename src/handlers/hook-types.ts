@@ -17,6 +17,6 @@ export type HookCtx<K extends HookName> = Parameters<HookHandler<K>>[1];
 
 export type HookHandlers = { [K in HookName]?: HookHandler<K> };
 
-// Convenience alias for the llm_output usage payload, so consumers map its
-// already-typed fields instead of re-checking shapes at runtime.
-export type LlmOutputUsage = HookEvent<"llm_output">["usage"];
+// OpenClaw's per-call usage shape, recovered from the llm_output event type.
+// Named once here; reused by the assistant-output capture and toUsage.
+export type LlmUsage = HookEvent<"llm_output">["usage"];

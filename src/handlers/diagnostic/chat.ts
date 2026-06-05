@@ -5,6 +5,7 @@
 import { runIsolated } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
+import { finalizeChatSpan } from "../llm-state.js";
 
 type ChatStartEvent = Extract<DiagnosticEventPayload, { type: "model.call.started" }>;
 type ChatFinalizeEvent = Extract<
@@ -14,7 +15,7 @@ type ChatFinalizeEvent = Extract<
 
 export function createChatDiagnosticHandlers(deps: HandlerDeps) {
   return {
-    // open the LLM span + track its callId; closeRunChatSpans does the .end().
+    // open the LLM span + track its callId; onChatFinalize ends it at model.call.completed.
     onChatStart(event: ChatStartEvent): void {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
@@ -34,16 +35,14 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
       }
     },
 
-    // record status only; closeRunChatSpans does the .end().
+    // close the chat span now so its input exports mid-run; run.completed only
+    // backstops spans that never reach a model.call.completed/error.
     onChatFinalize(
       event: ChatFinalizeEvent,
       status: "ok" | "error",
       errorType: string | undefined,
     ): void {
-      const handle = deps.registries.calls.get(event.callId);
-      if (!handle) return;
-      handle.status = status;
-      handle.errorType = errorType;
+      finalizeChatSpan(deps, event.runId, event.callId, status, errorType);
     },
   };
 }

@@ -3,15 +3,22 @@
 // SPDX-PackageName: weave-openclaw
 
 import { BoundedMap } from "../util/bounded-map.js";
-import type { LlmOutputUsage } from "../handlers/hook-types.js";
+import type { LlmUsage } from "../handlers/hook-types.js";
 
 // Capture buffers shared between hooks and the diagnostic service: hooks hold
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
 
-type LlmInputCapture = {
+export type LlmInputCapture = {
   systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];
+};
+
+// Per-call assistant output from before_message_write, recorded on the chat span
+// when it closes mid-run.
+type AssistantOutputCapture = {
+  text?: string;
+  usage?: LlmUsage;
 };
 
 type ToolCallArgsCapture = {
@@ -24,11 +31,6 @@ type ToolCallResultCapture = {
   result?: unknown;
 };
 
-type AssistantOutputBuffer = {
-  texts: string[];
-  usage?: LlmOutputUsage;
-};
-
 export type WeaveHookState = {
   llmInputs: BoundedMap<string, LlmInputCapture>; // keyed by callId, not runId
   currentCallByRun: BoundedMap<string, string>; // keyed by runId
@@ -37,7 +39,7 @@ export type WeaveHookState = {
   toolCallArgs: BoundedMap<string, ToolCallArgsCapture>; // keyed by toolCallId
   toolCallResults: BoundedMap<string, ToolCallResultCapture>; // keyed by toolCallId
   chatCallsByRun: BoundedMap<string, string[]>; // keyed by runId
-  assistantOutputByRun: BoundedMap<string, AssistantOutputBuffer>; // keyed by runId
+  assistantOutputByCall: BoundedMap<string, AssistantOutputCapture>; // keyed by callId
 };
 
 export function createWeaveHookState(): WeaveHookState {
@@ -48,7 +50,7 @@ export function createWeaveHookState(): WeaveHookState {
     toolCallArgs: new BoundedMap(),
     toolCallResults: new BoundedMap(),
     chatCallsByRun: new BoundedMap(),
-    assistantOutputByRun: new BoundedMap(),
+    assistantOutputByCall: new BoundedMap(),
   };
 }
 
@@ -88,8 +90,15 @@ export function captureLlmInput(
   callId: string,
   capture: LlmInputCapture,
 ): void {
-  if (!callId) return;
   state.llmInputs.set(callId, capture);
+}
+
+export function captureAssistantOutput(
+  state: WeaveHookState,
+  callId: string,
+  capture: AssistantOutputCapture,
+): void {
+  state.assistantOutputByCall.set(callId, capture);
 }
 
 export function captureToolStart(

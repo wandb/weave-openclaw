@@ -13,6 +13,7 @@ import {
   toolStarted,
   toolCompleted,
   modelUsage,
+  assistantMessage,
 } from "./test/helpers.js";
 
 // Stub weave.login so the smoke doesn't hit the live server or write ~/.netrc.
@@ -36,7 +37,7 @@ describe("end-to-end smoke", () => {
     toolStarted(dispatch, { runId: "r-1", toolCallId: "tc-1", spanId: "tcsp", parentSpanId: "csp" });
     dispatch.hook("after_tool_call", { runId: "r-1", toolCallId: "tc-1", result: { hits: 7 } });
     toolCompleted(dispatch, { runId: "r-1", toolCallId: "tc-1", spanId: "tcsp" });
-    dispatch.hook("llm_output", { runId: "r-1", assistantTexts: ["found 7"], usage: { input: 5, output: 3 } });
+    assistantMessage(dispatch, { sessionKey: "s-1", text: "found 7", usage: { input: 5, output: 3 } });
     modelCallCompleted(dispatch, { runId: "r-1", callId: "c-1", spanId: "csp" });
     modelUsage(dispatch, { runId: "r-1", costUsd: 0.0001 });
     runCompleted(dispatch, { runId: "r-1", sessionKey: "s-1" });
@@ -89,8 +90,8 @@ describe("end-to-end smoke", () => {
     `);
   });
 
-  // Real attempt shape: one llm_input, then model -> tool -> model, then one
-  // llm_output with both texts; each model call gets its own chat span.
+  // Real attempt shape: one llm_input, then model -> tool -> model. Each model
+  // call's output rides in on its own before_message_write; each gets its own chat span.
   it("multi-model-call attempt: both chat spans get their content", async () => {
     const { dispatch, finish } = await bootPlugin({ captureContent: true, agentName: "test-agent" });
 
@@ -99,6 +100,7 @@ describe("end-to-end smoke", () => {
     dispatch.hook("llm_input", { runId: "r-2", prompt: "find tennis stats", systemPrompt: "be brief" });
     dispatch.hook("model_call_started", { runId: "r-2", callId: "c-A" });
     modelCallStarted(dispatch, { runId: "r-2", callId: "c-A", spanId: "csp-A", parentSpanId: "sp2", traceId: "tt" });
+    assistantMessage(dispatch, { sessionKey: "s-2", text: "I'll search" });
     modelCallCompleted(dispatch, { runId: "r-2", callId: "c-A", spanId: "csp-A", traceId: "tt" });
     dispatch.hook("before_tool_call", { runId: "r-2", toolCallId: "tc-A", toolName: "search", params: { q: "tennis" } });
     toolStarted(dispatch, { runId: "r-2", toolCallId: "tc-A", spanId: "tsp-A", parentSpanId: "sp2", traceId: "tt" });
@@ -106,8 +108,8 @@ describe("end-to-end smoke", () => {
     toolCompleted(dispatch, { runId: "r-2", toolCallId: "tc-A", spanId: "tsp-A", traceId: "tt" });
     dispatch.hook("model_call_started", { runId: "r-2", callId: "c-B" });
     modelCallStarted(dispatch, { runId: "r-2", callId: "c-B", spanId: "csp-B", parentSpanId: "sp2", traceId: "tt" });
+    assistantMessage(dispatch, { sessionKey: "s-2", text: "Found 3 results", usage: { input: 12, output: 8 } });
     modelCallCompleted(dispatch, { runId: "r-2", callId: "c-B", spanId: "csp-B", traceId: "tt" });
-    dispatch.hook("llm_output", { runId: "r-2", assistantTexts: ["I'll search", "Found 3 results"], usage: { input: 12, output: 8 } });
     runCompleted(dispatch, { runId: "r-2", sessionKey: "s-2", trace: { traceId: "tt", spanId: "sp2" } });
     dispatch.hook("session_end", { sessionKey: "s-2" });
     await finish();
