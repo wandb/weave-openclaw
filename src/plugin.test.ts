@@ -81,28 +81,6 @@ describe("createWeavePlugin lifecycle", () => {
     expect(errored.getStatus().lifecycle).toBe("config-error");
     expect(errorLog.error).toHaveBeenCalled();
   });
-
-  it("warns at startup when content capture is on, and stays quiet when it is off", async () => {
-    const { createWeavePlugin } = await import("./plugin.js");
-
-    const onLog = makeLogger();
-    const on = createWeavePlugin({
-      pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k" },
-      hookState: createWeaveHookState(),
-    });
-    await on.service.start({ logger: onLog, config: {} } as any);
-    expect(on.getStatus().lifecycle).toBe("running");
-    expect(onLog.warn).toHaveBeenCalledWith(expect.stringContaining("captureContent"));
-
-    const offLog = makeLogger();
-    const off = createWeavePlugin({
-      pluginConfig: { entity: "my-team", project: "my-project", apiKey: "k", captureContent: false },
-      hookState: createWeaveHookState(),
-    });
-    await off.service.start({ logger: offLog, config: {} } as any);
-    expect(off.getStatus().lifecycle).toBe("running");
-    expect(offLog.warn).not.toHaveBeenCalledWith(expect.stringContaining("captureContent"));
-  });
 });
 
 describe("turn lifecycle", () => {

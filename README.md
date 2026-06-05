@@ -9,36 +9,18 @@ This is an OpenClaw plugin that sends a record of what your agents do to
 [W&B Weave](https://wandb.ai/site/weave), so you can see and search it all
 in one dashboard. Once it's running, every agent run, model call, and tool
 call shows up in the **Agents** tab of your Weave project, along with the
-full conversation, token usage, and cost.
-
-It is an observability tool, so it sends your agent traces to a hosted
-service. By default that includes the full text of prompts, replies, and
-tool inputs and results, unredacted. Read [Data and privacy](#data-and-privacy)
-before you enable it, especially for sensitive or regulated work.
+full conversation, token usage, and cost. By default it sends that content,
+unredacted, to W&B (a third-party service); see
+[Data and privacy](#data-and-privacy).
 
 ## Data and privacy
 
-This plugin exports a trace of your agent activity to W&B Weave. Be clear on
-what leaves your machine before you turn it on.
-
-- **Always sent while running:** trace structure, the names of agents,
-  models, and tools, and run-level token and cost totals.
-- **Sent when `captureContent` is on (the default):** the full text of
-  prompts, model replies, system instructions, and tool inputs and results.
-  The plugin does **not** redact this, so anything your agents read or write,
-  including secrets, file contents, and personal data, is sent as-is.
-- **Where it goes:** W&B's cloud (`wandb.ai`) by default, or your own
-  dedicated or self-hosted install if you set `WANDB_BASE_URL`. Retention,
-  access control, and deletion follow your W&B account and plan.
-- **Your API key** is read from config, the environment, or `~/.netrc`, and
-  is never written to traces or logs (`/weave status` shows only its source).
-
-To send structure and token and cost totals without any message text, set
-`captureContent: false` (see [Configuration](#configuration)). The plugin
-logs a notice at startup whenever content capture is on. For sensitive or
-regulated data, set `captureContent: false`, scrub content upstream before it
-reaches the plugin, or point the plugin at a W&B install you control, and
-confirm your W&B retention and access settings.
+This plugin sends a trace of your agent activity to W&B Weave, a hosted
+service. With `captureContent` on (the default) that includes the full,
+unredacted text of prompts, replies, and tool inputs and results. Set
+`captureContent: false` to send only structure and token and cost totals.
+For sensitive or regulated data, turn it off or scrub content upstream, and
+check your W&B retention and access settings.
 
 ## Requirements
 
