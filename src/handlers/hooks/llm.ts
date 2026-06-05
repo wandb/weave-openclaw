@@ -10,7 +10,7 @@ import {
   resolveCurrentCallId,
 } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";
-import type { HookCtx, HookEvent, HookHandler, LlmUsage } from "../hook-types.js";
+import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
 
 export function createLlmHookHandlers(deps: HandlerDeps): {
   model_call_started: HookHandler<"model_call_started">;
@@ -43,12 +43,7 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
       event: HookEvent<"before_message_write">,
       ctx: HookCtx<"before_message_write">,
     ): void {
-      // event.message is pi-agent-core's AgentMessage union (not imported); read structurally.
-      const message = event.message as {
-        role?: string;
-        content?: unknown;
-        usage?: LlmUsage;
-      };
+      const { message } = event;
       if (message.role !== "assistant") return;
       const sessionKey = ctx.sessionKey ?? event.sessionKey;
       const runId = sessionKey ? deps.runIdBySession.get(sessionKey) : undefined;
@@ -62,14 +57,17 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
   };
 }
 
-// Assistant text from an AgentMessage's content (string, or text/toolCall blocks).
-// Tool calls get their own execute_tool spans, so only text lands on the chat span.
-function extractAssistantText(content: unknown): string | undefined {
-  if (typeof content === "string") return content || undefined;
-  if (!Array.isArray(content)) return undefined;
-  const blocks = content as Array<{ type?: string; text?: string }>;
-  const text = blocks
-    .filter((b): b is { type: "text"; text: string } => b.type === "text" && typeof b.text === "string")
+type AssistantMessage = Extract<
+  HookEvent<"before_message_write">["message"],
+  { role: "assistant" }
+>;
+type TextContent = Extract<AssistantMessage["content"][number], { type: "text" }>;
+
+// Assistant text from the message content blocks. Tool calls get their own
+// execute_tool spans, so only text lands on the chat span.
+function extractAssistantText(content: AssistantMessage["content"]): string | undefined {
+  const text = content
+    .filter((b): b is TextContent => b.type === "text")
     .map((b) => b.text)
     .join("");
   return text || undefined;
