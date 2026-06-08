@@ -10,8 +10,7 @@ This is an OpenClaw plugin that sends a record of what your agents do to
 in one dashboard. Once it's running, every agent run, model call, and tool
 call shows up in the **Agents** tab of your Weave project, along with the
 full conversation, token usage, and cost. By default it sends that content,
-unredacted, to W&B (a third-party service); see
-[Data and privacy](#data-and-privacy).
+unredacted, to W&B (a third-party service).
 
 ## Data and privacy
 
