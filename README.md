@@ -9,7 +9,15 @@ This is an OpenClaw plugin that sends a record of what your agents do to
 [W&B Weave](https://wandb.ai/site/weave), so you can see and search it all
 in one dashboard. Once it's running, every agent run, model call, and tool
 call shows up in the **Agents** tab of your Weave project, along with the
-full conversation, token usage, and cost.
+full conversation, token usage, and cost. By default it sends that content,
+unredacted, to W&B (a third-party service).
+
+## Data and privacy
+
+This plugin sends a trace of your agent activity to W&B Weave, a hosted
+service. With `captureContent` on (the default) that includes the full,
+unredacted text of prompts, replies, and tool inputs and results. Set
+`captureContent: false` to send only structure and token and cost totals.
 
 ## Requirements
 

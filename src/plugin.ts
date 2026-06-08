@@ -142,6 +142,12 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         `weave: project=${cfg.projectId} service=${cfg.serviceName} agentVersion=${cfg.agentVersion} ` +
           `auth=${cfg.authSource ?? "WANDB_API_KEY env"} captureContent=${cfg.captureContent ? "on" : "off"}`,
       );
+      if (cfg.captureContent) {
+        ctx.logger.info(
+          "weave: captureContent is on; full conversation content (prompts, replies, tool inputs and results) " +
+            "is sent to W&B unredacted. Set captureContent=false to export only trace structure and token/cost totals.",
+        );
+      }
     },
     async stop(ctx) {
       lifecycle = "stopped";
