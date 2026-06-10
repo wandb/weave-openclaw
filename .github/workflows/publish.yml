@@ -10,16 +10,16 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-${{ github.event.inputs.release_ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Shared gate for both registries: assert the dispatched tag exists and that all
+  # version sources agree. npm-only checks live in the publish-npm job.
+  verify:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
@@ -57,6 +57,25 @@ jobs:
             exit 1
           fi
 
+  publish-npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ github.event.inputs.release_ref }}
+          fetch-depth: 0
+
+      - name: Check version not already on npm
+        env:
+          RELEASE_REF: ${{ github.event.inputs.release_ref }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="${RELEASE_REF#v}"
           if npm view "weave-openclaw@${PACKAGE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "::error::Version ${PACKAGE_VERSION} is already published to npm"
             exit 1
@@ -87,3 +106,26 @@ jobs:
         run: |
           npm pkg set name=weave-openclaw
           pnpm publish --no-git-checks --access public
+
+  # Publishes the scoped @wandb/weave-openclaw to ClawHub. Sibling of publish-npm
+  # (both gate on verify, neither on the other) so a failure in one neither cancels
+  # nor blocks the other, and "Re-run failed jobs" retries only the failed leaf.
+  # Pinned to a commit SHA for supply-chain safety; comment tracks the tag.
+  # OIDC trusted publishing (id-token), no long-lived token in steady state.
+  publish-clawhub:
+    needs: verify
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@8e1bad4ac1f0d68309e168623c1c0179622e684d  # v0.20.0
+    with:
+      source: ${{ github.repository }}
+      ref: ${{ github.event.inputs.release_ref }}
+      owner: wandb
+      dry_run: false
+    # Optional. Unset in steady state (OIDC is used). Provide a CLAWHUB_TOKEN repo
+    # secret only for the first publish if ClawHub trusted-publisher registration
+    # is not yet possible; remove it once OIDC is wired up. The workflow YAML does
+    # not change between bootstrap and steady state.
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}
