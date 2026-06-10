@@ -16,8 +16,7 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Shared gate for both registries: assert the dispatched tag exists and that all
-  # version sources agree. npm-only checks live in the publish-npm job.
+  # Shared version gate for both registries; npm-only checks live in publish-npm.
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -107,11 +106,8 @@ jobs:
           npm pkg set name=weave-openclaw
           pnpm publish --no-git-checks --access public
 
-  # Publishes the scoped @wandb/weave-openclaw to ClawHub. Sibling of publish-npm
-  # (both gate on verify, neither on the other) so a failure in one neither cancels
-  # nor blocks the other, and "Re-run failed jobs" retries only the failed leaf.
-  # Pinned to a commit SHA for supply-chain safety; comment tracks the tag.
-  # OIDC trusted publishing (id-token), no long-lived token in steady state.
+  # Sibling of publish-npm (both need verify, not each other): one failure
+  # doesn't block the other, and "Re-run failed jobs" retries just the failed leaf.
   publish-clawhub:
     needs: verify
     permissions:
@@ -123,9 +119,6 @@ jobs:
       ref: ${{ github.event.inputs.release_ref }}
       owner: wandb
       dry_run: false
-    # Optional. Unset in steady state (OIDC is used). Provide a CLAWHUB_TOKEN repo
-    # secret only for the first publish if ClawHub trusted-publisher registration
-    # is not yet possible; remove it once OIDC is wired up. The workflow YAML does
-    # not change between bootstrap and steady state.
+    # Optional: only for the first publish, before OIDC trusted publishing is set up.
     secrets:
       clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

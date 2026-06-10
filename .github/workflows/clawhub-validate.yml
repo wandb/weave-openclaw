@@ -1,7 +1,6 @@
 name: ClawHub Validate
 
-# Dry-run ClawHub publish so packaging, metadata, and source-provenance problems
-# surface on PRs and main rather than at release time. No publish mutation.
+# Dry-run ClawHub publish to catch packaging/metadata errors before release.
 
 on:
   push:
@@ -13,9 +12,8 @@ permissions:
   contents: read
 
 jobs:
-  # The reusable workflow resolves its own CLI source via GitHub OIDC, so it needs
-  # id-token even in dry-run mode. PRs from forks are not granted an OIDC token, so
-  # gate this to pushes and same-repo PRs; fork PRs skip cleanly instead of failing.
+  # Skip fork PRs: they get no OIDC token, which the reusable workflow needs
+  # even in dry-run mode.
   dry-run:
     if: >-
       github.event_name == 'push' ||
