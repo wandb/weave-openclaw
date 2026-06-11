@@ -10,16 +10,15 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 concurrency:
   group: publish-${{ github.event.inputs.release_ref }}
   cancel-in-progress: false
 
 jobs:
-  publish:
+  # Shared version gate for both registries; npm-only checks live in publish-npm.
+  verify:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
@@ -57,6 +56,25 @@ jobs:
             exit 1
           fi
 
+  publish-npm:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd  # v6
+        with:
+          ref: ${{ github.event.inputs.release_ref }}
+          fetch-depth: 0
+
+      - name: Check version not already on npm
+        env:
+          RELEASE_REF: ${{ github.event.inputs.release_ref }}
+        run: |
+          set -euo pipefail
+          PACKAGE_VERSION="${RELEASE_REF#v}"
           if npm view "weave-openclaw@${PACKAGE_VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
             echo "::error::Version ${PACKAGE_VERSION} is already published to npm"
             exit 1
@@ -87,3 +105,20 @@ jobs:
         run: |
           npm pkg set name=weave-openclaw
           pnpm publish --no-git-checks --access public
+
+  # Sibling of publish-npm (both need verify, not each other): one failure
+  # doesn't block the other, and "Re-run failed jobs" retries just the failed leaf.
+  publish-clawhub:
+    needs: verify
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@8e1bad4ac1f0d68309e168623c1c0179622e684d  # v0.20.0
+    with:
+      source: ${{ github.repository }}
+      ref: ${{ github.event.inputs.release_ref }}
+      owner: wandb
+      dry_run: false
+    # Optional: only for the first publish, before OIDC trusted publishing is set up.
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

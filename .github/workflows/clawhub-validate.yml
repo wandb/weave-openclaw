@@ -1,0 +1,29 @@
+name: ClawHub Validate
+
+# Dry-run ClawHub publish to catch packaging/metadata errors before release.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # Skip fork PRs: they get no OIDC token, which the reusable workflow needs
+  # even in dry-run mode.
+  dry-run:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@8e1bad4ac1f0d68309e168623c1c0179622e684d  # v0.20.0
+    with:
+      source: ${{ github.repository }}
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      owner: wandb
+      dry_run: true
