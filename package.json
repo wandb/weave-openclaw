@@ -29,6 +29,9 @@
     "build": {
       "openclawVersion": "2026.4.25"
     },
+    "install": {
+      "npmSpec": "weave-openclaw"
+    },
     "release": {
       "publishToNpm": true
     }
