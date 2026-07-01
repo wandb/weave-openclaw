@@ -61,6 +61,8 @@ describe("end-to-end smoke", () => {
         "gen_ai.request.model": "gpt-4o",
         "gen_ai.usage.input_tokens": 5,
         "gen_ai.usage.output_tokens": 3,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
       }
     `);
     expect(tool.attributes).toMatchInlineSnapshot(`
@@ -71,6 +73,8 @@ describe("end-to-end smoke", () => {
         "gen_ai.tool.call.id": "tc-1",
         "gen_ai.tool.call.result": "{"hits":7}",
         "gen_ai.tool.name": "search",
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
       }
     `);
     // weave.agent.version is the package version (asserted by value in
@@ -85,6 +89,8 @@ describe("end-to-end smoke", () => {
         "gen_ai.conversation.id": "s-1",
         "gen_ai.operation.name": "invoke_agent",
         "weave.cost.usd": 0.0001,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
         "weave.outcome": "completed",
       }
     `);
@@ -123,6 +129,8 @@ describe("end-to-end smoke", () => {
           "gen_ai.operation.name": "chat",
           "gen_ai.output.messages": "[{"role":"assistant","content":"I'll search"}]",
           "gen_ai.request.model": "gpt-4o",
+          "weave.integration.name": "weave-openclaw",
+          "weave.integration.version": "0.1.1",
         },
         {
           "gen_ai.conversation.id": "s-2",
@@ -131,6 +139,8 @@ describe("end-to-end smoke", () => {
           "gen_ai.request.model": "gpt-4o",
           "gen_ai.usage.input_tokens": 12,
           "gen_ai.usage.output_tokens": 8,
+          "weave.integration.name": "weave-openclaw",
+          "weave.integration.version": "0.1.1",
         },
       ]
     `);

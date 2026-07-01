@@ -104,6 +104,8 @@ describe("turn lifecycle", () => {
         "gen_ai.conversation.id": "s",
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.version": Any<String>,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
         "weave.outcome": "completed",
       }
     `,
@@ -170,6 +172,8 @@ describe("turn lifecycle", () => {
         "weave.agent.duration_ms": 1500,
         "weave.agent.success": true,
         "weave.agent.version": Any<String>,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
         "weave.outcome": "completed",
       }
     `,
@@ -183,6 +187,8 @@ describe("turn lifecycle", () => {
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.duration_ms": 100,
         "weave.agent.version": Any<String>,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
         "weave.outcome": "completed",
       }
     `,
@@ -196,6 +202,8 @@ describe("turn lifecycle", () => {
         "gen_ai.operation.name": "invoke_agent",
         "weave.agent.success": false,
         "weave.agent.version": Any<String>,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
         "weave.outcome": "completed",
       }
     `,
@@ -233,6 +241,8 @@ describe("llm two-signal close", () => {
         "gen_ai.request.model": "gpt-4o",
         "gen_ai.usage.input_tokens": 5,
         "gen_ai.usage.output_tokens": 3,
+        "weave.integration.name": "weave-openclaw",
+        "weave.integration.version": "0.1.1",
       }
     `);
   });

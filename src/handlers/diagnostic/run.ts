@@ -6,6 +6,7 @@ import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
 import { getOrCreateConversation } from "../hooks/session.js";
+import { stampIntegration } from "../integration.js";
 import { finalizeRunChatSpans } from "../llm-state.js";
 import { finalizeRunTools } from "./tool.js";
 
@@ -24,9 +25,11 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       // live sessionKey whose session_start we never saw (plugin started mid-session).
       const conversation = getOrCreateConversation(deps, event.sessionKey, agentName);
       const turn = runIsolated(() =>
-        conversation
-          ? conversation.startTurn({ agentName, model: event.model })
-          : startTurn({ agentName, model: event.model }),
+        stampIntegration(
+          conversation
+            ? conversation.startTurn({ agentName, model: event.model })
+            : startTurn({ agentName, model: event.model }),
+        ),
       );
       if (resolved.agentVersion)
         turn.setAttributes({ "weave.agent.version": resolved.agentVersion });
