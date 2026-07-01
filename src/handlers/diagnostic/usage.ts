@@ -20,7 +20,7 @@ export function createUsageDiagnosticHandlers(deps: HandlerDeps) {
       if (typeof event.costUsd === "number" && Number.isFinite(event.costUsd)) {
         const total = (deps.costByRun.get(runId) ?? 0) + event.costUsd;
         deps.costByRun.set(runId, total);
-        turn.setAttribute("weave.cost.usd", total);
+        turn.setAttributes({ "weave.cost.usd": total });
       }
       // usage is typed required but the runtime sometimes emits cost-only; guard.
       // Attribute names follow the OTel GenAI semconv as exposed by the Weave SDK

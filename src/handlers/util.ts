@@ -19,7 +19,7 @@ export function safeJson(value: unknown): string | undefined {
 export function setIfInt(turn: Turn | undefined, key: string, value: unknown): void {
   if (!turn) return;
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
-    turn.setAttribute(key, Math.trunc(value));
+    turn.setAttributes({ [key]: Math.trunc(value) });
   }
 }
 

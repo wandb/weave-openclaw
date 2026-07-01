@@ -126,16 +126,16 @@ describe("turn lifecycle", () => {
     expect(errored.status.code).toBe(2);
   });
 
-  it("opens a Session on session_start, wraps the run's Turn, and closes on session_end", async () => {
+  it("opens a Conversation on session_start, wraps the run's Turn, and closes on session_end", async () => {
     const { plugin, dispatch, finish } = await bootPlugin();
     dispatch.hook("session_start", { sessionKey: "s-1" });
-    expect(plugin.registries.sessions.has("s-1")).toBe(true);
+    expect(plugin.registries.conversations.has("s-1")).toBe(true);
     runStarted(dispatch, { runId: "r-1", sessionKey: "s-1" });
     runCompleted(dispatch, { runId: "r-1", sessionKey: "s-1" });
     dispatch.hook("session_end", { sessionKey: "s-1" });
-    expect(plugin.registries.sessions.has("s-1")).toBe(false);
+    expect(plugin.registries.conversations.has("s-1")).toBe(false);
     await finish();
-    // The Session surfaces only as gen_ai.conversation.id on the Turns it wraps; it
+    // The Conversation surfaces only as gen_ai.conversation.id on the Turns it wraps; it
     // never exports a standalone span, so the run's Turn is the only span emitted.
     const spans = exporter.getFinishedSpans();
     expect(spans.map(s => s.name)).toMatchInlineSnapshot(`
@@ -526,7 +526,7 @@ describe("hot-reload / lifecycle", () => {
     // previous lifecycle leaks into the next.
     await plugin.service.start({ logger: makeLogger() } as any);
     expect(plugin.registries.turns.size).toBe(0);
-    expect(plugin.registries.sessions.size).toBe(0);
+    expect(plugin.registries.conversations.size).toBe(0);
     expect(plugin.registries.calls.size).toBe(0);
     expect(plugin.registries.tools.size).toBe(0);
     expect(plugin.registries.subagents.size).toBe(0);

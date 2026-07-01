@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import type { LLM, Session, SubAgent, Tool, Turn } from "weave";
+import type { Conversation, LLM, SubAgent, Tool, Turn } from "weave";
 import { BoundedMap } from "../util/bounded-map.js";
 
 // Held open until run.completed so per-attempt llm_output attaches before .end().
@@ -13,7 +13,7 @@ export type LLMHandle = {
 };
 
 export type Registries = {
-  sessions: BoundedMap<string, Session>;
+  conversations: BoundedMap<string, Conversation>;
   turns: BoundedMap<string, Turn>;
   calls: BoundedMap<string, LLMHandle>;
   tools: BoundedMap<string, Tool>;
@@ -22,7 +22,7 @@ export type Registries = {
 
 export function createRegistries(): Registries {
   return {
-    sessions: new BoundedMap(),
+    conversations: new BoundedMap(),
     turns: new BoundedMap(),
     calls: new BoundedMap(),
     tools: new BoundedMap(),

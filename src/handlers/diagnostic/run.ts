@@ -5,7 +5,7 @@
 import { runIsolated, startTurn } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
-import { getOrCreateSession } from "../hooks/session.js";
+import { getOrCreateConversation } from "../hooks/session.js";
 import { finalizeRunChatSpans } from "../llm-state.js";
 import { finalizeRunTools } from "./tool.js";
 
@@ -22,16 +22,16 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       const agentName = resolved.agentName;
       // Lazy-create, not redundant with session_start: a run can reach us for a
       // live sessionKey whose session_start we never saw (plugin started mid-session).
-      const session = getOrCreateSession(deps, event.sessionKey, agentName);
+      const conversation = getOrCreateConversation(deps, event.sessionKey, agentName);
       const turn = runIsolated(() =>
-        session
-          ? session.startTurn({ agentName, model: event.model })
+        conversation
+          ? conversation.startTurn({ agentName, model: event.model })
           : startTurn({ agentName, model: event.model }),
       );
       if (resolved.agentVersion)
-        turn.setAttribute("weave.agent.version", resolved.agentVersion);
+        turn.setAttributes({ "weave.agent.version": resolved.agentVersion });
       if (resolved.agentDescription)
-        turn.setAttribute("gen_ai.agent.description", resolved.agentDescription);
+        turn.setAttributes({ "gen_ai.agent.description": resolved.agentDescription });
       deps.registries.turns.set(event.runId, turn);
       // Index by sessionKey so tool.loop events (which omit runId) reach this Turn.
       if (event.sessionKey) deps.runIdBySession.set(event.sessionKey, event.runId);
@@ -45,7 +45,7 @@ export function createRunDiagnosticHandlers(deps: HandlerDeps) {
       finalizeRunTools(deps, event.runId);
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      turn.setAttribute("weave.outcome", event.outcome);
+      turn.setAttributes({ "weave.outcome": event.outcome });
       if (isErrorOutcome(event.outcome)) {
         turn.end({ error: new Error(event.outcome) });
       } else {
