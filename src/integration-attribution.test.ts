@@ -4,11 +4,11 @@
 
 // Integration identity must ride onto EVERY span in a trace, not just the
 // invoke_agent root, so the Weave Agents backend can group/filter a chat or
-// execute_tool span by integration just like the turn. The plugin stamps it on
-// each span at creation (setAttributes): every span opens in its own
+// execute_tool span by integration just like the turn. The plugin propagates it
+// onto each span at creation (setAttributes): every span opens in its own
 // runIsolated frame where a Conversation's ambient attributes don't reach, so
-// per-span stamping is what lands it everywhere. The literal wire keys are the
-// contract the backend reads into its queryable custom-attribute maps.
+// applying it at each site is what propagates it everywhere. The literal wire
+// keys are the contract the backend reads into its queryable custom-attribute maps.
 
 import { describe, it, expect, vi, assert } from "vitest";
 import {
@@ -31,7 +31,7 @@ vi.mock("weave", async (importOriginal) => {
 const exporter = pinInMemoryExporter();
 
 describe("integration attribution", () => {
-  it("stamps weave.integration.* on every span under a session (turn, chat, tool)", async () => {
+  it("propagates weave.integration.* to every span under a session (turn, chat, tool)", async () => {
     const { dispatch, finish } = await bootPlugin({ agentName: "test-agent" });
 
     dispatch.hook("session_start", { sessionKey: "s-1" });
@@ -58,12 +58,12 @@ describe("integration attribution", () => {
     }
   });
 
-  it("stamps every span on the sessionless fallback (no sessionKey), children included", async () => {
+  it("propagates to every span on the sessionless fallback (no sessionKey), children included", async () => {
     const { dispatch, finish } = await bootPlugin({ agentName: "test-agent" });
 
     // run.started with no sessionKey: getOrCreateConversation returns undefined,
     // so the handler opens a root Turn directly with no Conversation. Per-span
-    // stamping still reaches the chat and tool spans nested under that Turn.
+    // propagation still reaches the chat and tool spans nested under that Turn.
     dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-x", trace: { traceId: "t", spanId: "sp" } });
     modelCallStarted(dispatch, { runId: "r-x", callId: "c-x", spanId: "csp" });
     toolStarted(dispatch, { runId: "r-x", toolCallId: "tc-x", spanId: "tcsp", parentSpanId: "csp" });
