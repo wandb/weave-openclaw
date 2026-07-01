@@ -74,7 +74,7 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
   };
 
   function resetTransientState(): void {
-    registries.sessions.clear();
+    registries.conversations.clear();
     registries.turns.clear();
     registries.calls.clear();
     registries.tools.clear();

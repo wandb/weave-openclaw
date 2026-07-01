@@ -15,11 +15,14 @@ export function createTurnHookHandlers(deps: HandlerDeps): {
       if (!event.runId) return;
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
-      turn.setAttribute("weave.agent.success", event.success);
-      if (event.error) turn.setAttribute("weave.agent.error", event.error);
+      const attrs: Record<string, string | number | boolean> = {
+        "weave.agent.success": event.success,
+      };
+      if (event.error) attrs["weave.agent.error"] = event.error;
       if (event.durationMs !== undefined && Number.isFinite(event.durationMs)) {
-        turn.setAttribute("weave.agent.duration_ms", Math.trunc(event.durationMs));
+        attrs["weave.agent.duration_ms"] = Math.trunc(event.durationMs);
       }
+      turn.setAttributes(attrs);
     },
 
     message_received(

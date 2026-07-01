@@ -38,7 +38,7 @@
   },
   "dependencies": {
     "@opentelemetry/api": "^1.9.1",
-    "weave": "^0.15.0"
+    "weave": "^0.16.1"
   },
   "devDependencies": {
     "@opentelemetry/sdk-trace-base": "^1.26.0",
