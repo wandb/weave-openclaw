@@ -21,7 +21,7 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@8e1bad4ac1f0d68309e168623c1c0179622e684d  # v0.20.0
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@a230d962db64019462c2c8ee400755eb92169908  # v0.23.1
     with:
       source: ${{ github.repository }}
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
