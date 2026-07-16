@@ -6,7 +6,6 @@ import { runIsolated } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { lookupToolCall } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";
-import { propagateIntegration } from "../integration.js";
 import { safeJson } from "../util.js";
 
 type ToolStartEvent = Extract<DiagnosticEventPayload, { type: "tool.execution.started" }>;
@@ -29,13 +28,11 @@ export function createToolDiagnosticHandlers(deps: HandlerDeps) {
         ? safeJson(captured?.params ?? event.paramsSummary)
         : undefined;
       const tool = runIsolated(() =>
-        propagateIntegration(
-          turn.startTool({
-            name: event.toolName ?? captured?.toolName ?? "unknown",
-            toolCallId: event.toolCallId,
-            args,
-          }),
-        ),
+        turn.startTool({
+          name: event.toolName ?? captured?.toolName ?? "unknown",
+          toolCallId: event.toolCallId,
+          args,
+        }),
       );
       deps.registries.tools.set(event.toolCallId, tool);
     },

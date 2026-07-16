@@ -5,7 +5,6 @@
 import { runIsolated } from "weave";
 import type { HandlerDeps } from "../deps.js";
 import type { HookCtx, HookEvent, HookHandler } from "../hook-types.js";
-import { propagateIntegration } from "../integration.js";
 
 export function createSubagentHookHandlers(deps: HandlerDeps): {
   subagent_spawned: HookHandler<"subagent_spawned">;
@@ -21,9 +20,7 @@ export function createSubagentHookHandlers(deps: HandlerDeps): {
       const turn = requesterRunId ? deps.registries.turns.get(requesterRunId) : undefined;
       if (!turn) return;
       if (deps.registries.subagents.has(event.runId)) return;
-      const sub = runIsolated(() =>
-        propagateIntegration(turn.startSubagent({ name: event.agentId })),
-      );
+      const sub = runIsolated(() => turn.startSubagent({ name: event.agentId }));
       const evAttrs: Record<string, string | number | boolean> = {
         "weave.agent.id": event.agentId,
         "weave.subagent.mode": event.mode,

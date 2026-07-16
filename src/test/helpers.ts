@@ -56,9 +56,14 @@ export function makeFakeApi(plugin: any) {
 }
 
 // Register a per-file beforeEach that pins a fresh InMemorySpanExporter as the
-// weave tracing provider before any plugin init() builds the real OTLP exporter
-// (provider is first-call-wins; the warmup turn forces it to build). Call once
-// at module scope per test file; read finished spans off the returned exporter.
+// weave tracing provider before any plugin init() builds the real OTLP exporter.
+// The warmup turn forces the provider to build with our exporter; the plugin's
+// own init() then reuses that provider instead of rebuilding an OTLP one.
+//
+// The warmup MUST init the same projectId the plugin uses (bootPlugin ->
+// my-team/my-project): weave caches the provider per projectId and rebuilds it
+// on a project switch, so a mismatch here would tear down our exporter the
+// moment the plugin's init() runs. Read finished spans off the returned exporter.
 export function pinInMemoryExporter() {
   const exporter = new InMemorySpanExporter();
   beforeEach(async () => {
@@ -66,7 +71,7 @@ export function pinInMemoryExporter() {
     vi.stubEnv("WANDB_API_KEY", "test-key");
     // Dynamic import so the per-file vi.mock("weave", ...) is applied first.
     const { init: weaveInit, startTurn } = await import("weave");
-    await weaveInit("test/test", {
+    await weaveInit("my-team/my-project", {
       genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
     });
     startTurn({ agentName: "warmup" }).end();

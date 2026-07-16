@@ -4,11 +4,12 @@
 
 // Integration identity must ride onto EVERY span in a trace, not just the
 // invoke_agent root, so the Weave Agents backend can group/filter a chat or
-// execute_tool span by integration just like the turn. The plugin propagates it
-// onto each span at creation (setAttributes): every span opens in its own
-// runIsolated frame where a Conversation's ambient attributes don't reach, so
-// applying it at each site is what propagates it everywhere. The literal wire
-// keys are the contract the backend reads into its queryable custom-attribute maps.
+// execute_tool span by integration just like the turn. The plugin sets it once
+// at each trace's root (on the Conversation, or on a rootless Turn), and the
+// weave SDK propagates it down the handle chain to every child span. This holds
+// even though each span opens in its own runIsolated frame: the attributes ride
+// the stored Conversation/Turn handle, not ambient state. The literal wire keys
+// are the contract the backend reads into its queryable custom-attribute maps.
 
 import { describe, it, expect, vi, assert } from "vitest";
 import {
@@ -62,8 +63,8 @@ describe("integration attribution", () => {
     const { dispatch, finish } = await bootPlugin({ agentName: "test-agent" });
 
     // run.started with no sessionKey: getOrCreateConversation returns undefined,
-    // so the handler opens a root Turn directly with no Conversation. Per-span
-    // propagation still reaches the chat and tool spans nested under that Turn.
+    // so the handler opens a rootless Turn carrying INTEGRATION_ATTRIBUTES, which
+    // the SDK propagates to the chat and tool spans nested under that Turn.
     dispatch.diagnostic({ type: "run.started", ts: 1000, runId: "r-x", trace: { traceId: "t", spanId: "sp" } });
     modelCallStarted(dispatch, { runId: "r-x", callId: "c-x", spanId: "csp" });
     toolStarted(dispatch, { runId: "r-x", toolCallId: "tc-x", spanId: "tcsp", parentSpanId: "csp" });

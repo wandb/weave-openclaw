@@ -5,7 +5,6 @@
 import { runIsolated } from "weave";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { HandlerDeps } from "../deps.js";
-import { propagateIntegration } from "../integration.js";
 import { finalizeChatSpan } from "../llm-state.js";
 
 type ChatStartEvent = Extract<DiagnosticEventPayload, { type: "model.call.started" }>;
@@ -21,12 +20,10 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
       const llm = runIsolated(() =>
-        propagateIntegration(
-          turn.startLLM({
-            model: event.model,
-            providerName: event.provider,
-          }),
-        ),
+        turn.startLLM({
+          model: event.model,
+          providerName: event.provider,
+        }),
       );
       // Default ok; a call with no model.call.completed/error before run.completed closes ok.
       deps.registries.calls.set(event.callId, { llm, status: "ok" });
