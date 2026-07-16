@@ -55,15 +55,10 @@ export function makeFakeApi(plugin: any) {
   };
 }
 
-// Register a per-file beforeEach that pins a fresh InMemorySpanExporter as the
-// weave tracing provider before any plugin init() builds the real OTLP exporter.
-// The warmup turn forces the provider to build with our exporter; the plugin's
-// own init() then reuses that provider instead of rebuilding an OTLP one.
-//
-// The warmup MUST init the same projectId the plugin uses (bootPlugin ->
-// my-team/my-project): weave caches the provider per projectId and rebuilds it
-// on a project switch, so a mismatch here would tear down our exporter the
-// moment the plugin's init() runs. Read finished spans off the returned exporter.
+// Pin a fresh InMemorySpanExporter as the weave provider (the warmup turn forces
+// it to build) before the plugin's init() builds a real OTLP one. Warm up with the
+// SAME projectId the plugin uses (my-team/my-project): weave rebuilds the provider
+// on a project switch, which would drop our exporter.
 export function pinInMemoryExporter() {
   const exporter = new InMemorySpanExporter();
   beforeEach(async () => {

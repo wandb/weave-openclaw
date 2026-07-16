@@ -2,14 +2,10 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-// Integration identity must ride onto EVERY span in a trace, not just the
-// invoke_agent root, so the Weave Agents backend can group/filter a chat or
-// execute_tool span by integration just like the turn. The plugin sets it once
-// at each trace's root (on the Conversation, or on a rootless Turn), and the
-// weave SDK propagates it down the handle chain to every child span. This holds
-// even though each span opens in its own runIsolated frame: the attributes ride
-// the stored Conversation/Turn handle, not ambient state. The literal wire keys
-// are the contract the backend reads into its queryable custom-attribute maps.
+// Integration identity must land on EVERY span, not just the invoke_agent root,
+// so the backend can group/filter chat/tool spans by integration too. Set once at
+// the trace root (Conversation, or a rootless Turn); weave propagates it down the
+// handle chain, which survives each span opening in its own runIsolated frame.
 
 import { describe, it, expect, vi, assert } from "vitest";
 import {
