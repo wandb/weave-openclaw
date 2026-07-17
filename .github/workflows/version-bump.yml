@@ -20,10 +20,21 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # github.token can't bypass the branch ruleset, so mint a token from the
+      # weave-open-source GitHub App, which is on the ruleset bypass list.
+      - name: Generate app token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  # v3.2.0
+        with:
+          # weave-open-source App Client ID (public, not a secret):
+          # github.com/organizations/wandb/settings/apps/weave-open-source
+          client-id: Iv23lisBZStNzmWeRUFw
+          private-key: ${{ secrets.WEAVE_OPEN_SOURCE_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           fetch-depth: 0
 
       - name: Set up pnpm
@@ -36,10 +47,25 @@ jobs:
         with:
           node-version-file: package.json
 
-      - name: Configure git
+      # The bot's numeric user id builds the noreply email that links commits
+      # to the weave-open-source[bot] account.
+      - name: Look up app bot user id
+        id: app-user
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          set -euo pipefail
+          USER_ID="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          echo "user-id=$USER_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Configure git
+        env:
+          APP_SLUG: ${{ steps.app-token.outputs.app-slug }}
+          APP_USER_ID: ${{ steps.app-user.outputs.user-id }}
+        run: |
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${APP_USER_ID}+${APP_SLUG}[bot]@users.noreply.github.com"
 
       - name: Check tag conflict
         env:
