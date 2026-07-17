@@ -5,6 +5,7 @@
 import { runIsolated, startConversation, type Conversation } from "weave";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
+import { INTEGRATION_ATTRIBUTES } from "../integration.js";
 
 // Get-or-create the Conversation for this key, idempotent so its two callers (the
 // session_start hook and onRunStarted) can each be first. Returns undefined
@@ -18,7 +19,7 @@ export function getOrCreateConversation(
   const existing = deps.registries.conversations.get(sessionKey);
   if (existing) return existing;
   const conversation = runIsolated(() =>
-    startConversation({ conversationId: sessionKey, agentName }),
+    startConversation({ conversationId: sessionKey, agentName, attributes: INTEGRATION_ATTRIBUTES }),
   );
   deps.registries.conversations.set(sessionKey, conversation);
   return conversation;

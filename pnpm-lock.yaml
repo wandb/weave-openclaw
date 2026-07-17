@@ -12,8 +12,8 @@ importers:
         specifier: ^1.9.1
         version: 1.9.1
       weave:
-        specifier: ^0.16.1
-        version: 0.16.1
+        specifier: ^0.16.3
+        version: 0.16.3
     devDependencies:
       '@opentelemetry/sdk-trace-base':
         specifier: ^1.26.0
@@ -2413,8 +2413,8 @@ packages:
       jsdom:
         optional: true
 
-  weave@0.16.1:
-    resolution: {integrity: sha512-quYA2bJRCNzVFFJqFv2dMU81+Zt8Xd7oL3w1F+9CNvUSWbs/CILWGxXI7pdLFD+JUiHDimKF6s/MFj8P69fpNA==}
+  weave@0.16.3:
+    resolution: {integrity: sha512-8sPJfXDKh25YAHmhnJ4qN1IuHGKLHVuvCwhEZo25g6/qxV0ddfujimUXt9797Z3Mt/zMFSy+kVBL6T9UXUbIoQ==}
 
   web-push@3.6.7:
     resolution: {integrity: sha512-OpiIUe8cuGjrj3mMBFWY+e4MMIkW3SVT+7vEIjvD9kejGUypv8GPDf84JdPWskK8zMRIJ6xYGm+Kxr8YkPyA0A==}
@@ -5262,7 +5262,7 @@ snapshots:
       - tsx
       - yaml
 
-  weave@0.16.1:
+  weave@0.16.3:
     dependencies:
       '@opentelemetry/api': 1.9.1
       '@opentelemetry/exporter-trace-otlp-proto': 0.53.0(@opentelemetry/api@1.9.1)
