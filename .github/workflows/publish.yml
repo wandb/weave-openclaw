@@ -19,6 +19,8 @@ jobs:
   # Shared version gate for both registries; npm-only checks live in publish-npm.
   verify:
     runs-on: ubuntu-latest
+    outputs:
+      release_commit: ${{ steps.release.outputs.release_commit }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
@@ -27,6 +29,7 @@ jobs:
           fetch-depth: 0
 
       - name: Verify release tag and version
+        id: release
         env:
           RELEASE_REF: ${{ github.event.inputs.release_ref }}
         run: |
@@ -55,6 +58,15 @@ jobs:
             echo "::error::src/config/version.ts PACKAGE_VERSION (${SERVICE_VERSION}) does not match package.json (${PACKAGE_VERSION})"
             exit 1
           fi
+
+          RELEASE_COMMIT="$(git rev-list -n 1 "${RELEASE_REF}")"
+          echo "release_commit=${RELEASE_COMMIT}" >> "$GITHUB_OUTPUT"
+
+  build-clawpack:
+    needs: verify
+    uses: ./.github/workflows/build-clawpack.yml
+    with:
+      ref: ${{ github.event.inputs.release_ref }}
 
   publish-npm:
     needs: verify
@@ -107,7 +119,9 @@ jobs:
           pnpm publish --no-git-checks --access public
 
   publish-clawhub:
-    needs: verify
+    needs:
+      - verify
+      - build-clawpack
     permissions:
       actions: read  # required by the reusable workflow's declared permissions
       contents: read
@@ -118,6 +132,10 @@ jobs:
       ref: ${{ github.event.inputs.release_ref }}
       owner: wandb
       dry_run: false
+      package_artifact_name: clawpack
+      source_repo: ${{ github.repository }}
+      source_commit: ${{ needs.verify.outputs.release_commit }}
+      source_ref: refs/tags/${{ github.event.inputs.release_ref }}
     # Optional: only for the first publish, before OIDC trusted publishing is set up.
     secrets:
       clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

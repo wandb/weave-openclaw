@@ -14,7 +14,16 @@ permissions:
 jobs:
   # Skip fork PRs: they get no OIDC token, which the reusable workflow needs
   # even in dry-run mode.
+  build-clawpack:
+    if: >-
+      github.event_name == 'push' ||
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/build-clawpack.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
   dry-run:
+    needs: build-clawpack
     if: >-
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
@@ -28,3 +37,7 @@ jobs:
       ref: ${{ github.event.pull_request.head.sha || github.sha }}
       owner: wandb
       dry_run: true
+      package_artifact_name: clawpack
+      source_repo: ${{ github.repository }}
+      source_commit: ${{ github.event.pull_request.head.sha || github.sha }}
+      source_ref: ${{ github.event.pull_request.head.ref || github.ref }}
