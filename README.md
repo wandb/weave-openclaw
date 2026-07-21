@@ -32,12 +32,16 @@ Install it with OpenClaw's plugin manager. This works from any directory,
 so you don't have to be inside a particular project:
 
 ```bash
-openclaw plugins install weave-openclaw
+openclaw plugins install clawhub:@wandb/weave-openclaw
 ```
 
-Use the full name `weave-openclaw`; `weave` on its own is the W&B SDK, not
-this plugin. This registers the plugin with your gateway. You don't import
-it in your own code; the gateway loads it from the config you set up next.
+The scoped ClawHub name installs the W&B-maintained `weave-openclaw`
+package. `weave` on its own is the W&B SDK, not this plugin. This registers
+the plugin with your gateway. You don't import it in your own code; the
+gateway loads it from the config you set up next.
+
+For the complete setup guide, see
+[Trace OpenClaw with Weave](https://docs.wandb.ai/weave/guides/integrations/agents/openclaw-harness).
 
 ## Quickstart
 
@@ -163,7 +167,7 @@ https://wandb.ai/<entity>/<project>/weave/agents
 
 Open the **Agents** tab in the left nav for the conversation view and
 per-agent grouping, or the **Traces** tab for the full step-by-step view.
-The complete Weave docs are at [weave-docs.wandb.ai](https://weave-docs.wandb.ai/).
+The complete Weave docs are at [docs.wandb.ai/weave](https://docs.wandb.ai/weave).
 
 ## Troubleshooting
 
