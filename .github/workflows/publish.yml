@@ -106,11 +106,10 @@ jobs:
           npm pkg set name=weave-openclaw
           pnpm publish --no-git-checks --access public
 
-  # Sibling of publish-npm (both need verify, not each other): one failure
-  # doesn't block the other, and "Re-run failed jobs" retries just the failed leaf.
   publish-clawhub:
     needs: verify
     permissions:
+      actions: read  # required by the reusable workflow's declared permissions
       contents: read
       id-token: write
     uses: openclaw/clawhub/.github/workflows/package-publish.yml@a230d962db64019462c2c8ee400755eb92169908  # v0.23.1

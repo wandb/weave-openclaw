@@ -19,6 +19,7 @@ jobs:
       github.event_name == 'push' ||
       github.event.pull_request.head.repo.full_name == github.repository
     permissions:
+      actions: read  # required by the reusable workflow's declared permissions
       contents: read
       id-token: write
     uses: openclaw/clawhub/.github/workflows/package-publish.yml@a230d962db64019462c2c8ee400755eb92169908  # v0.23.1
