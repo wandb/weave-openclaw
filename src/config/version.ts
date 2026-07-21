@@ -3,4 +3,4 @@
 // SPDX-PackageName: weave-openclaw
 
 export const PACKAGE_NAME = "weave-openclaw";
-export const PACKAGE_VERSION = "0.1.2";
+export const PACKAGE_VERSION = "0.1.3";
