@@ -4,8 +4,8 @@
   "description": "OpenClaw plugin that traces agent sessions to W&B Weave for observability and debugging.",
   "license": "MIT",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "main": "./index.ts",
+  "types": "./index.ts",
   "engines": {
     "node": ">=22.14.0"
   },
@@ -14,14 +14,17 @@
     "url": "git+https://github.com/wandb/weave-openclaw.git"
   },
   "files": [
-    "dist/",
+    "index.ts",
+    "src/",
+    "!src/**/*.test.ts",
+    "!src/test/",
     "openclaw.plugin.json",
     "README.md",
     "LICENSE"
   ],
   "openclaw": {
     "extensions": [
-      "./dist/index.js"
+      "./index.ts"
     ],
     "compat": {
       "pluginApi": ">=2026.4.25"

@@ -35,7 +35,8 @@ function getOrCreateSharedPlugin(pluginConfig: unknown): WeavePlugin {
   return plugin;
 }
 
-export default definePluginEntry({
+// definePluginEntry's return type isn't exported; annotate the default export to keep its emitted type portable.
+const pluginEntry: ReturnType<typeof definePluginEntry> = definePluginEntry({
   id: "weave",
   name: "W&B Weave",
   description:
@@ -68,3 +69,5 @@ export default definePluginEntry({
     });
   },
 });
+
+export default pluginEntry;
