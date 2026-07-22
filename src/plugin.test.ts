@@ -255,10 +255,13 @@ describe("llm two-signal close", () => {
     );
   });
 
-  it("does not export system instructions when captureContent=false", async () => {
-    const { dispatch, finish } = await setupTurn({ captureContent: false });
+  it("does not capture or export LLM input when captureContent=false", async () => {
+    const { dispatch, hookState, finish } = await setupTurn({ captureContent: false });
     dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "secret" });
+    expect(hookState.systemPromptByRun.has("r")).toBe(false);
+    expect(hookState.pendingLlmInputByRun.has("r")).toBe(false);
     dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    expect(hookState.llmInputs.has("c-1")).toBe(false);
     modelCallStarted(dispatch, { callId: "c-1", spanId: "sp2" });
     modelCallCompleted(dispatch, { callId: "c-1", spanId: "sp2" });
     runCompleted(dispatch);

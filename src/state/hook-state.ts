@@ -9,7 +9,6 @@ import type { LlmUsage } from "../handlers/hook-types.js";
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
 
 export type LlmInputCapture = {
-  systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];
 };

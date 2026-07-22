@@ -23,8 +23,9 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
     },
 
     llm_input(event: HookEvent<"llm_input">): void {
+      // Gate at ingestion so disabled content never enters transient state.
+      if (!deps.getResolved()?.captureContent) return;
       const capture = {
-        systemPrompt: event.systemPrompt,
         prompt: event.prompt,
         historyMessages: event.historyMessages,
       };
@@ -34,19 +35,17 @@ export function createLlmHookHandlers(deps: HandlerDeps): {
         deps.hookState.systemPromptByRun.delete(event.runId);
       }
       const callId = resolveCurrentCallId(deps.hookState, event.runId);
-      if (deps.getResolved()?.captureContent) {
-        const systemInstructions = event.systemPrompt ? [event.systemPrompt] : [];
-        deps.registries.turns.get(event.runId)?.record({ systemInstructions });
-        if (callId && event.systemPrompt) {
-          // The diagnostic model-call event can precede this hook. LLM's
-          // systemInstructions constructor field is immutable, so enrich an
-          // already-open span with the same wire shape the SDK emits at end().
-          deps.registries.calls.get(callId)?.llm.setAttributes({
-            "gen_ai.system_instructions": JSON.stringify([
-              { type: "text", content: event.systemPrompt },
-            ]),
-          });
-        }
+      const systemInstructions = event.systemPrompt ? [event.systemPrompt] : [];
+      deps.registries.turns.get(event.runId)?.record({ systemInstructions });
+      if (callId && event.systemPrompt) {
+        // The diagnostic model-call event can precede this hook. LLM's
+        // systemInstructions constructor field is immutable, so enrich an
+        // already-open span with the same wire shape the SDK emits at end().
+        deps.registries.calls.get(callId)?.llm.setAttributes({
+          "gen_ai.system_instructions": JSON.stringify([
+            { type: "text", content: event.systemPrompt },
+          ]),
+        });
       }
       if (callId) {
         captureLlmInput(deps.hookState, callId, capture);

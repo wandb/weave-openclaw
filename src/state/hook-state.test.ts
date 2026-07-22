@@ -12,10 +12,9 @@ import {
 describe("hook-state pending llm_input buffer", () => {
   test("buffers llm_input before model_call_started and promotes it per callId across turns", () => {
     const state = createWeaveHookState();
-    bufferPendingLlmInputForRun(state, "r", { prompt: "first", systemPrompt: "sys" });
+    bufferPendingLlmInputForRun(state, "r", { prompt: "first" });
     beginModelCall(state, "r", "c-1");
     expect(state.llmInputs.get("c-1")?.prompt).toBe("first");
-    expect(state.llmInputs.get("c-1")?.systemPrompt).toBe("sys");
     expect(state.pendingLlmInputByRun.get("r")).toBeUndefined();
 
     // Next turn attributes to its own callId, not the previous one.
