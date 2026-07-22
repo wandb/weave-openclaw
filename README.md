@@ -73,22 +73,46 @@ and [ClawHub listing](https://clawhub.ai/wandb/plugins/weave-openclaw).
 
 ## Configuration
 
-| Option | Default | Description |
-|---|---|---|
-| `entity` | required | W&B team or username |
-| `project` | required | W&B project |
-| `apiKey` | SDK lookup | Plain key or OpenClaw SecretRef |
-| `serviceName` | `openclaw-agent` | Shown by `/weave status` |
-| `agentName` | event value | Agent label |
-| `agentVersion` | plugin version | Agent version label |
-| `agentDescription` | unset | Agent description |
-| `captureContent` | `true` | Capture unredacted conversation and tool content |
-| `flushIntervalMs` | `5000` | Export interval; minimum `1000` ms |
-
-SecretRef example:
+Only `entity` and `project` are required. Everything else has a sensible
+default.
 
 ```js
-apiKey: { source: "env", provider: "default", id: "WANDB_API_KEY" }
+{
+  plugins: {
+    entries: {
+      weave: {
+        enabled: true,
+        config: {
+          entity: "your-team",        // your W&B team or username
+          project: "your-project",    // your W&B project name
+
+          // Leave apiKey out to use the WANDB_API_KEY environment variable.
+          // File and exec SecretRefs also work with a configured OpenClaw
+          // secret provider.
+          // A plain key string works too, but keeping secrets out of config is safer:
+          //   apiKey: "your-wandb-api-key"
+          apiKey: { source: "env", provider: "default", id: "WANDB_API_KEY" },
+
+          serviceName: "openclaw-agent",   // shown in /weave status
+          // These help group and label your agents in the dashboard.
+          agentName: "my-agent",
+          agentVersion: "v1.0",
+          agentDescription: "What my agent does.",
+
+          // On by default. Set to false to stop recording the actual message
+          // text (for example, to meet a privacy or retention policy). The
+          // plugin records text as-is and does not hide sensitive values, so
+          // remove them beforehand if you need to.
+          captureContent: true,
+
+          // How often (in milliseconds) traces are sent.
+          flushIntervalMs: 1000,
+        },
+        hooks: { allowConversationAccess: true },
+      },
+    },
+  },
+}
 ```
 
 Environment refs work without extra setup. File and exec refs need a matching
