@@ -19,10 +19,14 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
     onChatStart(event: ChatStartEvent): void {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
+      // llm_input only populates this map when content capture is enabled.
+      const systemPrompt = deps.hookState.systemPromptByRun.get(event.runId);
+      if (systemPrompt) turn.record({ systemInstructions: [systemPrompt] });
       const llm = runIsolated(() =>
         turn.startLLM({
           model: event.model,
           providerName: event.provider,
+          ...(systemPrompt ? { systemInstructions: [systemPrompt] } : {}),
         }),
       );
       // Default ok; a call with no model.call.completed/error before run.completed closes ok.

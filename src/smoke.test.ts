@@ -57,10 +57,11 @@ describe("end-to-end smoke", () => {
       `
       {
         "gen_ai.conversation.id": "s-1",
-        "gen_ai.input.messages": "[{"role":"system","content":"be helpful"},{"role":"user","content":"hi"}]",
+        "gen_ai.input.messages": "[{"role":"user","content":"hi"}]",
         "gen_ai.operation.name": "chat",
         "gen_ai.output.messages": "[{"role":"assistant","content":"found 7"}]",
         "gen_ai.request.model": "gpt-4o",
+        "gen_ai.system_instructions": "[{"type":"text","content":"be helpful"}]",
         "gen_ai.usage.input_tokens": 5,
         "gen_ai.usage.output_tokens": 3,
         "weave.integration.name": "weave-openclaw",
@@ -94,6 +95,7 @@ describe("end-to-end smoke", () => {
         "gen_ai.agent.name": "test-agent",
         "gen_ai.conversation.id": "s-1",
         "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.system_instructions": "[{"type":"text","content":"be helpful"}]",
         "weave.cost.usd": 0.0001,
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
@@ -136,10 +138,11 @@ describe("end-to-end smoke", () => {
       [
         {
           "gen_ai.conversation.id": "s-2",
-          "gen_ai.input.messages": "[{"role":"system","content":"be brief"},{"role":"user","content":"find tennis stats"}]",
+          "gen_ai.input.messages": "[{"role":"user","content":"find tennis stats"}]",
           "gen_ai.operation.name": "chat",
           "gen_ai.output.messages": "[{"role":"assistant","content":"I'll search"}]",
           "gen_ai.request.model": "gpt-4o",
+          "gen_ai.system_instructions": "[{"type":"text","content":"be brief"}]",
           "weave.integration.name": "weave-openclaw",
           "weave.integration.version": Any<String>,
         },
@@ -148,6 +151,7 @@ describe("end-to-end smoke", () => {
           "gen_ai.operation.name": "chat",
           "gen_ai.output.messages": "[{"role":"assistant","content":"Found 3 results"}]",
           "gen_ai.request.model": "gpt-4o",
+          "gen_ai.system_instructions": "[{"type":"text","content":"be brief"}]",
           "gen_ai.usage.input_tokens": 12,
           "gen_ai.usage.output_tokens": 8,
           "weave.integration.name": "weave-openclaw",

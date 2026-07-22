@@ -9,7 +9,6 @@ import type { LlmUsage } from "../handlers/hook-types.js";
 // payloads (prompts, usage, tool args/results) the event stream doesn't carry.
 
 export type LlmInputCapture = {
-  systemPrompt?: string;
   prompt: string;
   historyMessages?: unknown[];
 };
@@ -33,6 +32,7 @@ type ToolCallResultCapture = {
 
 export type WeaveHookState = {
   llmInputs: BoundedMap<string, LlmInputCapture>; // keyed by callId, not runId
+  systemPromptByRun: BoundedMap<string, string>; // reused by every model call in an attempt
   currentCallByRun: BoundedMap<string, string>; // keyed by runId
   // llm_input that arrived before model_call_started; promoted once callId is known
   pendingLlmInputByRun: BoundedMap<string, LlmInputCapture>; // keyed by runId
@@ -45,6 +45,7 @@ export type WeaveHookState = {
 export function createWeaveHookState(): WeaveHookState {
   return {
     llmInputs: new BoundedMap(),
+    systemPromptByRun: new BoundedMap(),
     currentCallByRun: new BoundedMap(),
     pendingLlmInputByRun: new BoundedMap(),
     toolCallArgs: new BoundedMap(),
