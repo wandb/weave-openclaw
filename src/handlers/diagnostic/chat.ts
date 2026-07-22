@@ -19,10 +19,15 @@ export function createChatDiagnosticHandlers(deps: HandlerDeps) {
     onChatStart(event: ChatStartEvent): void {
       const turn = deps.registries.turns.get(event.runId);
       if (!turn) return;
+      const systemPrompt = deps.getResolved()?.captureContent
+        ? deps.hookState.systemPromptByRun.get(event.runId)
+        : undefined;
+      if (systemPrompt) turn.record({ systemInstructions: [systemPrompt] });
       const llm = runIsolated(() =>
         turn.startLLM({
           model: event.model,
           providerName: event.provider,
+          ...(systemPrompt ? { systemInstructions: [systemPrompt] } : {}),
         }),
       );
       // Default ok; a call with no model.call.completed/error before run.completed closes ok.

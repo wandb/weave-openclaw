@@ -30,6 +30,7 @@ export function finalizeChatSpan(
 export function finalizeRunChatSpans(deps: HandlerDeps, runId: string): void {
   const callIds = deps.hookState.chatCallsByRun.get(runId);
   deps.hookState.chatCallsByRun.delete(runId);
+  deps.hookState.systemPromptByRun.delete(runId);
   deps.hookState.currentCallByRun.delete(runId);
   for (const callId of callIds ?? []) closeChatSpan(deps, callId, "ok", undefined);
 }
@@ -78,12 +79,9 @@ function shapeMessages(capture: {
 }): { input: Message[]; output: Message[] } {
   const out: { input: Message[]; output: Message[] } = { input: [], output: [] };
   if (capture.input) {
-    if (capture.input.systemPrompt) {
-      out.input.push({ role: "system", content: capture.input.systemPrompt });
-    }
     if (Array.isArray(capture.input.historyMessages)) {
       for (const m of capture.input.historyMessages) {
-        if (isMessage(m)) out.input.push(m);
+        if (isMessage(m) && m.role !== "system") out.input.push(m);
       }
     }
     if (capture.input.prompt) {

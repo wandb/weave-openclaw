@@ -224,6 +224,7 @@ describe("llm two-signal close", () => {
     assistantMessage(dispatch, { sessionKey: "s", text: "hello", usage: { input: 5, output: 3 } });
     modelCallCompleted(dispatch, { callId: "c-1", spanId: "sp2" });
     runCompleted(dispatch);
+    expect(hookState.systemPromptByRun.has("r")).toBe(false);
     await finish();
     const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
     const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
@@ -231,22 +232,45 @@ describe("llm two-signal close", () => {
     assert(turn);
     // chat span nests under the invoke_agent Turn
     expect(chat.parentSpanId).toBe(turn.spanContext().spanId);
-    // full emitted payload: model, conversation, captured input/output messages, usage
+    // System instructions use their dedicated semantic-convention field instead
+    // of being mixed into the ordinary conversation messages.
     expect(chat.attributes).toMatchInlineSnapshot(
       { "weave.integration.version": expect.any(String) },
       `
       {
         "gen_ai.conversation.id": "s",
-        "gen_ai.input.messages": "[{"role":"system","content":"be helpful"},{"role":"user","content":"hi"}]",
+        "gen_ai.input.messages": "[{"role":"user","content":"hi"}]",
         "gen_ai.operation.name": "chat",
         "gen_ai.output.messages": "[{"role":"assistant","content":"hello"}]",
         "gen_ai.request.model": "gpt-4o",
+        "gen_ai.system_instructions": "[{"type":"text","content":"be helpful"}]",
         "gen_ai.usage.input_tokens": 5,
         "gen_ai.usage.output_tokens": 3,
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
       }
     `);
+    expect(turn.attributes["gen_ai.system_instructions"]).toBe(
+      '[{"type":"text","content":"be helpful"}]',
+    );
+  });
+
+  it("does not export system instructions when captureContent=false", async () => {
+    const { dispatch, finish } = await setupTurn({ captureContent: false });
+    dispatch.hook("llm_input", { runId: "r", prompt: "hi", systemPrompt: "secret" });
+    dispatch.hook("model_call_started", { runId: "r", callId: "c-1" });
+    modelCallStarted(dispatch, { callId: "c-1", spanId: "sp2" });
+    modelCallCompleted(dispatch, { callId: "c-1", spanId: "sp2" });
+    runCompleted(dispatch);
+    await finish();
+
+    const chat = exporter.getFinishedSpans().find(s => s.name === "chat");
+    const turn = exporter.getFinishedSpans().find(s => s.name === "invoke_agent");
+    assert(chat);
+    assert(turn);
+    expect(chat.attributes["gen_ai.system_instructions"]).toBeUndefined();
+    expect(turn.attributes["gen_ai.system_instructions"]).toBeUndefined();
+    expect(chat.attributes["gen_ai.input.messages"]).toBeUndefined();
   });
 
   it("marks the chat span ERROR on model.call.error", async () => {
@@ -529,8 +553,14 @@ describe("hot-reload / lifecycle", () => {
     // Open some state under the first start().
     runStarted(dispatch, { runId: "r-1" });
     dispatch.hook("session_start", { sessionKey: "s" });
+    dispatch.hook("llm_input", {
+      runId: "r-1",
+      prompt: "hi",
+      systemPrompt: "temporary instructions",
+    });
     modelUsage(dispatch, { runId: "r-1", costUsd: 0.42 });
     expect(plugin.registries.turns.size).toBeGreaterThan(0);
+    expect(hookState.systemPromptByRun.size).toBe(1);
 
     // Second start() with no stop() in between — simulates plugin
     // re-registration or hot-reload. All per-run registries plus cost /
@@ -543,6 +573,7 @@ describe("hot-reload / lifecycle", () => {
     expect(plugin.registries.tools.size).toBe(0);
     expect(plugin.registries.subagents.size).toBe(0);
     expect(hookState.chatCallsByRun.size).toBe(0);
+    expect(hookState.systemPromptByRun.size).toBe(0);
     expect(hookState.assistantOutputByCall.size).toBe(0);
 
     await plugin.service.stop({ logger: makeLogger() } as any);
