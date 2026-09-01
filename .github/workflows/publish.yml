@@ -23,7 +23,7 @@ jobs:
       release_commit: ${{ steps.release.outputs.release_commit }}
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           ref: ${{ github.event.inputs.release_ref }}
           fetch-depth: 0
@@ -76,7 +76,7 @@ jobs:
       id-token: write
     steps:
       - name: Checkout repository
-        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10  # v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803  # v6
         with:
           ref: ${{ github.event.inputs.release_ref }}
           fetch-depth: 0
@@ -126,7 +126,7 @@ jobs:
       actions: read  # required by the reusable workflow's declared permissions
       contents: read
       id-token: write
-    uses: openclaw/clawhub/.github/workflows/package-publish.yml@a230d962db64019462c2c8ee400755eb92169908  # v0.23.1
+    uses: openclaw/clawhub/.github/workflows/package-publish.yml@87ca030c30f3cfb78ab15c8e66b5ff1469c8f9c8  # v0.23.3
     with:
       source: ${{ github.repository }}
       ref: ${{ github.event.inputs.release_ref }}
