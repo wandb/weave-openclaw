@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { runIsolated } from "weave";
+import { runIsolated } from "@coreweave/forge-sdk/agentlens/tracing";
 import type { DiagnosticEventPayload } from "openclaw/plugin-sdk/diagnostic-runtime";
 import { lookupToolCall } from "../../state/hook-state.js";
 import type { HandlerDeps } from "../deps.js";

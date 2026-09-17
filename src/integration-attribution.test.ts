@@ -20,11 +20,6 @@ import {
 } from "./test/helpers.js";
 import { PACKAGE_NAME, PACKAGE_VERSION } from "./config/version.js";
 
-vi.mock("weave", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("weave")>();
-  return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
-});
-
 const exporter = pinInMemoryExporter();
 
 describe("integration attribution", () => {
@@ -50,6 +45,8 @@ describe("integration attribution", () => {
     assert(tool);
 
     for (const span of [turn, chat, tool]) {
+      expect(span.attributes["weave.source"]).toBe("forge-integration");
+      expect(span.resource.attributes["weave.sdk.name"]).toBe("forge");
       expect(span.attributes["weave.integration.name"]).toBe(PACKAGE_NAME);
       expect(span.attributes["weave.integration.version"]).toBe(PACKAGE_VERSION);
     }
@@ -78,6 +75,8 @@ describe("integration attribution", () => {
     assert(tool);
 
     for (const span of [turn, chat, tool]) {
+      expect(span.attributes["weave.source"]).toBe("forge-integration");
+      expect(span.resource.attributes["weave.sdk.name"]).toBe("forge");
       expect(span.attributes["weave.integration.name"]).toBe(PACKAGE_NAME);
       expect(span.attributes["weave.integration.version"]).toBe(PACKAGE_VERSION);
     }
