@@ -16,12 +16,6 @@ import {
   assistantMessage,
 } from "./test/helpers.js";
 
-// Stub weave.login so the smoke doesn't hit the live server or write ~/.netrc.
-vi.mock("weave", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("weave")>();
-  return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
-});
-
 const exporter = pinInMemoryExporter();
 
 describe("end-to-end smoke", () => {
@@ -53,8 +47,7 @@ describe("end-to-end smoke", () => {
     assert(tool);
 
     expect(chat.attributes).toMatchInlineSnapshot(
-      { "weave.integration.version": expect.any(String) },
-      `
+      { "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.conversation.id": "s-1",
         "gen_ai.input.messages": "[{"role":"user","content":"hi"}]",
@@ -66,11 +59,11 @@ describe("end-to-end smoke", () => {
         "gen_ai.usage.output_tokens": 3,
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
+        "weave.source": "forge-integration",
       }
     `);
     expect(tool.attributes).toMatchInlineSnapshot(
-      { "weave.integration.version": expect.any(String) },
-      `
+      { "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.conversation.id": "s-1",
         "gen_ai.operation.name": "execute_tool",
@@ -80,6 +73,7 @@ describe("end-to-end smoke", () => {
         "gen_ai.tool.name": "search",
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
+        "weave.source": "forge-integration",
       }
     `);
     // weave.agent.version is the package version (asserted by value in
@@ -89,8 +83,7 @@ describe("end-to-end smoke", () => {
     const turnAttrs: Record<string, unknown> = { ...turn.attributes };
     delete turnAttrs["weave.agent.version"];
     expect(turnAttrs).toMatchInlineSnapshot(
-      { "weave.integration.version": expect.any(String) },
-      `
+      { "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.agent.name": "test-agent",
         "gen_ai.conversation.id": "s-1",
@@ -100,6 +93,7 @@ describe("end-to-end smoke", () => {
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
         "weave.outcome": "completed",
+        "weave.source": "forge-integration",
       }
     `);
   });
@@ -129,12 +123,10 @@ describe("end-to-end smoke", () => {
     await finish();
 
     const chats = exporter.getFinishedSpans().filter(s => s.name === "chat");
-    expect(chats.map(s => s.attributes)).toMatchInlineSnapshot(
-      [
-        { "weave.integration.version": expect.any(String) },
-        { "weave.integration.version": expect.any(String) },
-      ],
-      `
+    expect(chats.map(s => ({
+      ...s.attributes,
+      "weave.integration.version": "<version>",
+    }))).toMatchInlineSnapshot(`
       [
         {
           "gen_ai.conversation.id": "s-2",
@@ -144,7 +136,8 @@ describe("end-to-end smoke", () => {
           "gen_ai.request.model": "gpt-4o",
           "gen_ai.system_instructions": "[{"type":"text","content":"be brief"}]",
           "weave.integration.name": "weave-openclaw",
-          "weave.integration.version": Any<String>,
+          "weave.integration.version": "<version>",
+          "weave.source": "forge-integration",
         },
         {
           "gen_ai.conversation.id": "s-2",
@@ -155,7 +148,8 @@ describe("end-to-end smoke", () => {
           "gen_ai.usage.input_tokens": 12,
           "gen_ai.usage.output_tokens": 8,
           "weave.integration.name": "weave-openclaw",
-          "weave.integration.version": Any<String>,
+          "weave.integration.version": "<version>",
+          "weave.source": "forge-integration",
         },
       ]
     `);

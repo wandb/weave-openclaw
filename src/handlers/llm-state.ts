@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import type { Message, Usage } from "weave";
+import type { Message, Usage } from "@coreweave/forge-sdk/agentlens/tracing";
 import type { HandlerDeps } from "./deps.js";
 import type { LlmUsage } from "./hook-types.js";
 import { totalPromptTokens } from "./util.js";

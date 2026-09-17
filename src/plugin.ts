@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { flushOTel, init as weaveInit, login as weaveLogin } from "weave";
+import { flushOTel, init as initTracing } from "@coreweave/forge-sdk/agentlens/tracing";
 import type { OpenClawPluginService } from "openclaw/plugin-sdk/plugin-entry";
 import type {
   DiagnosticEventMetadata,
@@ -10,7 +10,7 @@ import type {
 } from "openclaw/plugin-sdk/diagnostic-runtime";
 import type { WeaveHookState } from "./state/hook-state.js";
 import { resolveConfig, type RawConfig, type ResolvedConfig } from "./config/config.js";
-import { readWandbBaseUrl } from "./config/env.js";
+import { readDefaultApiKey, readWandbBaseUrl } from "./config/env.js";
 import { createRegistries, type Registries } from "./state/registries.js";
 import { formatStatus, type StatusSnapshot } from "./config/status.js";
 import { PACKAGE_VERSION } from "./config/version.js";
@@ -114,22 +114,17 @@ export function createWeavePlugin(params: CreateWeavePluginParams): WeavePlugin 
         );
         return;
       }
-      if (cfg.apiKey) {
-        try {
-          await weaveLogin(cfg.apiKey, readWandbBaseUrl());
-        } catch (err) {
-          lifecycle = "config-error";
-          lifecycleDetail = err instanceof Error ? err.message : String(err);
-          ctx.logger.error(`weave: login failed: ${lifecycleDetail}`);
-          return;
-        }
-      }
       try {
-        const client = await weaveInit(cfg.projectId, {
-          genai: { batchOptions: { scheduledDelayMillis: cfg.flushIntervalMs } },
+        if (!cfg.apiKey) {
+          const credential = await readDefaultApiKey();
+          cfg.apiKey = credential?.value;
+          cfg.authSource = credential?.source;
+        }
+        await initTracing(cfg.projectId, {
+          apiKey: cfg.apiKey,
+          serviceName: cfg.serviceName,
+          batchOptions: { scheduledDelayMillis: cfg.flushIntervalMs },
         });
-        // init() fills the W&B default entity for a bare project; use the resolved id.
-        cfg.projectId = client.projectId;
       } catch (err) {
         lifecycle = "config-error";
         lifecycleDetail = err instanceof Error ? err.message : String(err);

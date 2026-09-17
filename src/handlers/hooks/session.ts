@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import { runIsolated, startConversation, type Conversation } from "weave";
+import { runIsolated, startConversation, type Conversation } from "@coreweave/forge-sdk/agentlens/tracing";
 import type { HandlerDeps } from "../deps.js";
 import type { HookEvent, HookHandler } from "../hook-types.js";
 import { INTEGRATION_ATTRIBUTES } from "../integration.js";

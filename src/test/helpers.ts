@@ -55,24 +55,23 @@ export function makeFakeApi(plugin: any) {
   };
 }
 
-// Pin a fresh InMemorySpanExporter as the weave provider (the warmup turn forces
-// it to build) before the plugin's init() builds a real OTLP one. Warm up with the
-// SAME projectId the plugin uses (my-team/my-project): weave rebuilds the provider
-// on a project switch, which would drop our exporter.
+// Keep the real Forge provider and span emitters; replace only its export destination.
+let exporter: InMemorySpanExporter;
+vi.mock("@coreweave/forge-sdk/agentlens/tracing", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@coreweave/forge-sdk/agentlens/tracing")>();
+  return {
+    ...actual,
+    init: async (project: string, options: Parameters<typeof actual.init>[1]) => {
+      const next = new InMemorySpanExporter();
+      await actual.init(project, { ...options, spanProcessor: new SimpleSpanProcessor(next) });
+      exporter = next;
+    },
+  };
+});
+
 export function pinInMemoryExporter() {
-  const exporter = new InMemorySpanExporter();
-  beforeEach(async () => {
-    exporter.reset();
-    vi.stubEnv("WANDB_API_KEY", "test-key");
-    // Dynamic import so the per-file vi.mock("weave", ...) is applied first.
-    const { init: weaveInit, startTurn } = await import("weave");
-    await weaveInit("my-team/my-project", {
-      genai: { spanProcessor: new SimpleSpanProcessor(exporter) },
-    });
-    startTurn({ agentName: "warmup" }).end();
-    exporter.reset();
-  });
-  return exporter;
+  beforeEach(() => vi.stubEnv("WANDB_API_KEY", "test-key"));
+  return { getFinishedSpans: () => exporter.getFinishedSpans() };
 }
 
 // Diagnostic-event builders. The plugin correlates open/close events by id

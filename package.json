@@ -46,11 +46,12 @@
     }
   },
   "dependencies": {
+    "@coreweave/forge-sdk": "file:.context/coreweave-forge-sdk-0.1.0.tgz",
     "@opentelemetry/api": "^1.9.1",
-    "weave": "^0.16.3"
+    "netrc-parser": "^3.1.6"
   },
   "devDependencies": {
-    "@opentelemetry/sdk-trace-base": "^1.26.0",
+    "@opentelemetry/sdk-trace-base": "^2.11.0",
     "@types/node": "^22.10.0",
     "openclaw": ">=2026.6.5",
     "typescript": "^5.6.0",

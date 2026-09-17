@@ -24,12 +24,6 @@ import {
   assistantMessage,
 } from "./test/helpers.js";
 
-// Stub weave.login so tests don't hit the live server or write ~/.netrc.
-vi.mock("weave", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("weave")>();
-  return { ...actual, login: vi.fn().mockResolvedValue(undefined) };
-});
-
 const exporter = pinInMemoryExporter();
 
 describe("createWeavePlugin lifecycle", () => {
@@ -97,8 +91,7 @@ describe("turn lifecycle", () => {
     // never has to be hand-edited; the snapshots below match it as Any<String>.
     expect(turn.attributes["weave.agent.version"]).toBe(PACKAGE_VERSION);
     expect(turn.attributes).toMatchInlineSnapshot(
-      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) },
-      `
+      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
@@ -107,9 +100,9 @@ describe("turn lifecycle", () => {
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
         "weave.outcome": "completed",
+        "weave.source": "forge-integration",
       }
-    `,
-    );
+    `);
   });
 
   it("maps outcome to span status: aborted stays OK, error marks ERROR (weave.outcome stamped)", async () => {
@@ -163,8 +156,7 @@ describe("turn lifecycle", () => {
     const spans = exporter.getFinishedSpans().filter(s => s.name === "invoke_agent");
     expect(spans).toHaveLength(3);
     expect(spans[0].attributes).toMatchInlineSnapshot(
-      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) },
-      `
+      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
@@ -175,12 +167,11 @@ describe("turn lifecycle", () => {
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
         "weave.outcome": "completed",
+        "weave.source": "forge-integration",
       }
-    `,
-    );
+    `);
     expect(spans[1].attributes).toMatchInlineSnapshot(
-      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) },
-      `
+      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
@@ -190,12 +181,11 @@ describe("turn lifecycle", () => {
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
         "weave.outcome": "completed",
+        "weave.source": "forge-integration",
       }
-    `,
-    );
+    `);
     expect(spans[2].attributes).toMatchInlineSnapshot(
-      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) },
-      `
+      { "weave.agent.version": expect.any(String), "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.agent.name": "openclaw-agent",
         "gen_ai.conversation.id": "s",
@@ -205,9 +195,9 @@ describe("turn lifecycle", () => {
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
         "weave.outcome": "completed",
+        "weave.source": "forge-integration",
       }
-    `,
-    );
+    `);
   });
 });
 
@@ -231,12 +221,11 @@ describe("llm two-signal close", () => {
     assert(chat);
     assert(turn);
     // chat span nests under the invoke_agent Turn
-    expect(chat.parentSpanId).toBe(turn.spanContext().spanId);
+    expect(chat.parentSpanContext?.spanId).toBe(turn.spanContext().spanId);
     // System instructions use their dedicated semantic-convention field instead
     // of being mixed into the ordinary conversation messages.
     expect(chat.attributes).toMatchInlineSnapshot(
-      { "weave.integration.version": expect.any(String) },
-      `
+      { "weave.integration.version": expect.any(String) }, `
       {
         "gen_ai.conversation.id": "s",
         "gen_ai.input.messages": "[{"role":"user","content":"hi"}]",
@@ -248,6 +237,7 @@ describe("llm two-signal close", () => {
         "gen_ai.usage.output_tokens": 3,
         "weave.integration.name": "weave-openclaw",
         "weave.integration.version": Any<String>,
+        "weave.source": "forge-integration",
       }
     `);
     expect(turn.attributes["gen_ai.system_instructions"]).toBe(

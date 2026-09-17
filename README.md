@@ -14,6 +14,13 @@ costs in [W&B Weave](https://wandb.ai/site/weave).
 > results are sent unredacted to W&B. Set it to `false` to record only trace
 > structure, tokens, and costs.
 
+## Tracing SDK
+
+Tracing uses `@coreweave/forge-sdk/agentlens/tracing`. Every turn, chat, tool,
+and subagent span carries `weave.source = forge-integration`; the existing
+integration name and version remain separate. The OTLP resource reports
+`weave.sdk.name = forge`. Plugin configuration and credential precedence are unchanged.
+
 ## Requirements
 
 - Node.js >= 22.14.0

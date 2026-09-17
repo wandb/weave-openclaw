@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 // SPDX-PackageName: weave-openclaw
 
-import type { Turn } from "weave";
+import type { Turn } from "@coreweave/forge-sdk/agentlens/tracing";
 
 // Serialize a captured value for a span attribute; strings pass through.
 export function safeJson(value: unknown): string | undefined {
